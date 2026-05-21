@@ -17,7 +17,9 @@ import {
   Trophy,
   Calculator,
   Megaphone,
-  User
+  User,
+  Menu,
+  X
 } from 'lucide-react';
 import { UserProfile, Question } from './types';
 import { Header } from './components/Header';
@@ -53,6 +55,7 @@ export default function App() {
   const [emailInput, setEmailInput] = useState('');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState<string>('plannerTab');
+  const [navOpen, setNavOpen] = useState(false);
   
   const [theme, setTheme] = useState<string>(() => {
     return localStorage.getItem('bp_theme') || 'strawberry-matcha';
@@ -621,6 +624,13 @@ export default function App() {
 
   const isAdmin = profile.email === 'admin@boardpassph.com' || profile.email === 'test@test.com';
 
+  const allNavTabs = [
+    ...tabs,
+    ...(isAdmin ? [{ id: 'adminTab', label: 'Admin Console', icon: ShieldAlert }] : []),
+  ];
+
+  const activeTabLabel = allNavTabs.find(t => t.id === activeTab)?.label ?? 'BoardPassPH';
+
   return (
     <div className="min-h-screen bg-foam transition-all duration-300">
       <Header 
@@ -638,41 +648,105 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      <div className="border-b border-pine/10 bg-white/60 backdrop-blur-sm sticky top-0 z-30 overflow-x-auto no-scrollbar">
-        <div className="flex items-center gap-0.5 px-4 max-w-7xl mx-auto">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-3 text-[11px] font-bold uppercase tracking-wide whitespace-nowrap transition-all duration-150 cursor-pointer select-none border-b-2 ${
-                  isActive 
-                    ? 'border-pine text-pine' 
-                    : 'border-transparent text-pine/50 hover:text-pine/80 hover:border-pine/20'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{tab.label}</span>
-              </button>
-            );
-          })}
-          {isAdmin && (
-            <button
-              onClick={() => setActiveTab('adminTab')}
-              className={`flex items-center gap-1.5 px-3 py-3 text-[11px] font-bold uppercase tracking-wide whitespace-nowrap transition-all duration-150 cursor-pointer select-none border-b-2 ${
-                activeTab === 'adminTab'
-                  ? 'border-pine text-pine' 
-                  : 'border-transparent text-pine/50 hover:text-pine/80'
-              }`}
-            >
-              <ShieldAlert className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Admin</span>
-            </button>
-          )}
+      {/* ── Sticky nav bar with hamburger ───────────────────────── */}
+      <div className="border-b border-pine/10 bg-white/80 backdrop-blur-md sticky top-0 z-30">
+        <div className="flex items-center gap-3 px-4 max-w-7xl mx-auto h-12">
+          <button
+            onClick={() => setNavOpen(true)}
+            className="p-2 rounded-xl hover:bg-pine/10 text-pine transition-all cursor-pointer select-none"
+            aria-label="Open navigation"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <span className="flex-1 text-center text-[11px] font-black uppercase tracking-widest text-pine/60 truncate">
+            {activeTabLabel}
+          </span>
+          <div className="w-9" />
         </div>
       </div>
+
+      {/* ── Slide-in navigation drawer ───────────────────────────── */}
+      {navOpen && (
+        <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setNavOpen(false)}
+          />
+
+          {/* Drawer panel */}
+          <div className="relative w-72 max-w-[85vw] bg-pine h-full flex flex-col overflow-hidden shadow-2xl">
+            {/* Drawer header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+              <div>
+                <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-sage">Navigation</p>
+                <h2 className="font-display text-xl text-cream leading-none mt-0.5">
+                  Board<span className="text-mint font-normal italic">Pass</span>PH
+                </h2>
+              </div>
+              <button
+                onClick={() => setNavOpen(false)}
+                className="p-2 rounded-xl hover:bg-white/10 text-cream/60 hover:text-cream transition cursor-pointer"
+                aria-label="Close navigation"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* User info strip */}
+            <div className="px-5 py-3 border-b border-white/10 bg-black/10 shrink-0">
+              <p className="text-[10px] text-sage font-mono truncate">{profile.email}</p>
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <span className="text-[9px] uppercase tracking-wider font-black text-mint bg-teal-900/50 border border-teal-500/20 px-2 py-0.5 rounded-full">
+                  {profile.tier}
+                </span>
+                <span className="text-[9px] text-cream/50 font-mono">
+                  🪙 {(profile.coins ?? 0).toLocaleString()} coins
+                </span>
+                <span className="text-[9px] text-cream/50 font-mono">
+                  ⚡ {profile.streak}d streak
+                </span>
+              </div>
+            </div>
+
+            {/* Tab list */}
+            <nav className="flex-1 overflow-y-auto py-2 no-scrollbar">
+              {allNavTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => { setActiveTab(tab.id); setNavOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-5 py-3 text-sm font-bold transition-all cursor-pointer select-none border-l-2 ${
+                      isActive
+                        ? 'bg-white/15 text-cream border-mint'
+                        : 'text-cream/55 hover:text-cream hover:bg-white/8 border-transparent'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0" />
+                    <span>{tab.label}</span>
+                    {isActive && (
+                      <span className="ml-auto w-1.5 h-1.5 rounded-full bg-mint shrink-0" />
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Sign out at bottom */}
+            <div className="px-5 py-4 border-t border-white/10 shrink-0">
+              <button
+                onClick={() => { handleLogout(); setNavOpen(false); }}
+                className="w-full flex items-center gap-2 px-4 py-2.5 bg-red-900/30 hover:bg-red-900/50 border border-red-500/20 text-red-300 hover:text-red-200 font-bold text-xs rounded-xl transition cursor-pointer select-none"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
@@ -770,7 +844,10 @@ export default function App() {
             )}
 
             {activeTab === 'adminTab' && isAdmin && (
-              <AdminPanel profile={profile} />
+              <AdminPanel
+                profile={profile}
+                setProfile={setProfile as React.Dispatch<React.SetStateAction<UserProfile | null>>}
+              />
             )}
           </div>
         </div>

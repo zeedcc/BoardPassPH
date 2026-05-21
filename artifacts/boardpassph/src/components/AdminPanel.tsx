@@ -124,45 +124,69 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ profile, setProfile }) =
     }
   };
 
+  const getLocalProfiles = (): UserProfile[] => {
+    const result: UserProfile[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('bp_profile_')) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const p = JSON.parse(raw) as UserProfile;
+            if (p.email) result.push(p);
+          }
+        } catch {}
+      }
+    }
+    return result;
+  };
+
+  const mergeProfiles = (firestoreList: UserProfile[], localList: UserProfile[]): UserProfile[] => {
+    const map = new Map<string, UserProfile>();
+    localList.forEach(p => map.set(p.email.toLowerCase().trim(), p));
+    firestoreList.forEach(p => map.set(p.email.toLowerCase().trim(), p));
+    return Array.from(map.values()).sort((a, b) => a.email.localeCompare(b.email));
+  };
+
   useEffect(() => {
     setLoading(true);
     setStatusMessage(null);
     const queryCol = collection(db, 'profiles');
     
     const unsubscribe = onSnapshot(queryCol, (snapshot) => {
-      const profilesList: UserProfile[] = [];
+      const firestoreList: UserProfile[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as UserProfile;
-        if (data.email) {
-          profilesList.push(data);
-        }
+        if (data.email) firestoreList.push(data);
       });
-      setAllProfiles(profilesList);
+      const merged = mergeProfiles(firestoreList, getLocalProfiles());
+      setAllProfiles(merged);
       setLoading(false);
-      
-      // Auto-select logged-in profile if first time or keep active selection updated
-      setProfile((prevActive) => {
-        const currentActive = prevActive;
-        setSelectedProfile((prevSelected) => {
-          if (prevSelected) {
-            const match = profilesList.find(p => p.email.toLowerCase().trim() === prevSelected.email.toLowerCase().trim());
-            return match || prevSelected;
-          } else if (currentActive) {
-            const found = profilesList.find(p => p.email.toLowerCase().trim() === currentActive.email.toLowerCase().trim());
-            if (found) {
-              setCustomXp(found.totalXp);
-              setCustomStreak(found.streak);
-              setCustomStreakShields(found.streakShields ?? 0);
-              setCustomTier(found.tier);
-              return found;
-            }
+
+      setSelectedProfile((prevSelected) => {
+        if (prevSelected) {
+          const match = merged.find(p => p.email.toLowerCase().trim() === prevSelected.email.toLowerCase().trim());
+          return match || prevSelected;
+        } else if (profile) {
+          const found = merged.find(p => p.email.toLowerCase().trim() === profile.email.toLowerCase().trim());
+          if (found) {
+            setCustomXp(found.totalXp);
+            setCustomStreak(found.streak);
+            setCustomStreakShields(found.streakShields ?? 0);
+            setCustomTier(found.tier);
+            return found;
           }
-          return prevSelected;
-        });
-        return prevActive;
+        }
+        return prevSelected;
       });
     }, (error) => {
-      console.warn("Real-time Admin List listener failed, reverting to static query:", error);
+      console.warn("Firestore real-time listener failed — loading from local registry:", error);
+      const localList = getLocalProfiles();
+      if (localList.length > 0) {
+        setAllProfiles(localList);
+        setStatusMessage({ text: `⚠️ Firestore unavailable — showing ${localList.length} locally cached profile(s). Changes will save locally.`, ok: false });
+      }
+      setLoading(false);
       fetchAllProfiles();
     });
 
@@ -260,7 +284,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ profile, setProfile }) =
       localStorage.setItem(`bp_profile_${selectedProfile.email.toLowerCase().trim()}`, JSON.stringify(updatedProfile));
 
       // 3. Mirror to active reviewee session if editing their own credentials
-      if (profile && profile.email.toLowerCase() === selectedProfile.email.toLowerCase()) {
+      if (setProfile && profile && profile.email.toLowerCase() === selectedProfile.email.toLowerCase()) {
         setProfile(updatedProfile);
       }
 
@@ -280,7 +304,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ profile, setProfile }) =
       });
       // Fallback
       localStorage.setItem(`bp_profile_${selectedProfile.email.toLowerCase().trim()}`, JSON.stringify(updatedProfile));
-      if (profile && profile.email.toLowerCase() === selectedProfile.email.toLowerCase()) {
+      if (setProfile && profile && profile.email.toLowerCase() === selectedProfile.email.toLowerCase()) {
         setProfile(updatedProfile);
       }
     } finally {
