@@ -16,10 +16,11 @@ type FirebaseConfig = {
 
 const firebaseConfig = firebaseConfigRaw as FirebaseConfig;
 const app = initializeApp(firebaseConfig);
-const useDefaultFirestore = !firebaseConfig.firestoreDatabaseId || firebaseConfig.firestoreDatabaseId === '(default)';
+const firestoreDatabaseId = firebaseConfig.firestoreDatabaseId;
+const useDefaultFirestore = !firestoreDatabaseId || firestoreDatabaseId === '(default)';
 export const db = useDefaultFirestore
   ? getFirestore(app)
-  : getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  : getFirestore(app, firestoreDatabaseId);
 export const auth = getAuth();
 
 signInAnonymously(auth).catch((err) => {
