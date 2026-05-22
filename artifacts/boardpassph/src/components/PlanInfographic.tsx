@@ -251,9 +251,9 @@ export const PlanInfographic: React.FC = () => {
             </h4>
           </div>
           <div className="space-y-1.5">
-            <div className="text-xl font-display font-bold text-amber-950">₱299 <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-semibold">LIFETIME</span></div>
+            <div className="text-xl font-display font-bold text-amber-950">₱79 <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-semibold">/mo</span></div>
             <p className="text-[10px] text-amber-800/80 leading-normal italic font-serif">
-              "Pay once, pass once. Use it until your board exam — no subscriptions, no stress."
+              "Unlimited practice, adaptive engine, and full topics index — cancel anytime."
             </p>
           </div>
           {/* Key capability meter */}
@@ -278,9 +278,9 @@ export const PlanInfographic: React.FC = () => {
             </h4>
           </div>
           <div className="space-y-1.5">
-            <div className="text-xl font-display font-bold text-rose-950">₱549 <span className="text-[10px] text-rose-800 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded font-semibold">LIFETIME</span></div>
+            <div className="text-xl font-display font-bold text-rose-950">₱149 <span className="text-[10px] text-rose-800 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded font-semibold">/mo</span></div>
             <p className="text-[10px] text-rose-800/80 leading-normal italic font-serif">
-              "Pay once, pass once. Use it until your board exam — no subscriptions, no stress."
+              "Full clinical arsenal including Mock Board, Pharmacology Q-Pack, and Priority Support."
             </p>
           </div>
           {/* Key capability meter */}

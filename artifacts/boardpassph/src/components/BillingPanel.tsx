@@ -1,59 +1,73 @@
 import React, { useState } from 'react';
-import { Coins, CheckCircle, Zap, ExternalLink, Loader2, RefreshCw, Info } from 'lucide-react';
+import { Award, CheckCircle, Zap, ExternalLink, Loader2, RefreshCw, Info, ShieldCheck, BookOpen } from 'lucide-react';
 import { UserProfile } from '../types';
+import { PlanInfographic } from './PlanInfographic';
 
 interface BillingPanelProps {
   profile: UserProfile;
   setProfile: React.Dispatch<React.SetStateAction<UserProfile>>;
 }
 
-const PACKAGES = [
+const PLANS = [
   {
-    id: 'sulit',
-    name: 'Sulit',
-    price: 50,
-    coins: 50000,
-    bonus: 0,
-    color: 'emerald',
-    badge: 'Starter',
-    description: 'Perfect for trying out AI practice questions',
-    perQ: { budget: 10000, standard: 500, premium: 250 },
+    id: 'free',
+    name: 'Clinical Trial',
+    price: 0,
+    period: 'forever',
+    color: 'gray',
+    badge: 'Free',
+    description: 'Try the platform with limited daily questions.',
+    highlight: false,
+    features: [
+      '3 AI questions per day',
+      'DSM-5 core trials',
+      'Basic XP & streak system',
+      'Limited spaced repetition',
+    ],
   },
   {
     id: 'pro',
-    name: 'Pro',
-    price: 149,
-    coins: 150000,
-    bonus: 10000,
+    name: 'Pro Suite',
+    price: 79,
+    period: '/mo',
     color: 'amber',
     badge: '★ Best Value',
-    description: 'Most popular choice for serious reviewees',
-    perQ: { budget: 32000, standard: 1600, premium: 800 },
+    description: 'Serious reviewees ready to level up their board prep.',
+    highlight: true,
+    features: [
+      'Unlimited AI practice questions',
+      'All PRC board topics index',
+      'Adaptive difficulty engine',
+      '90s timed sprint drills',
+      'Full XP, badges & leaderboard',
+      'Standard support',
+    ],
   },
   {
     id: 'clinical',
-    name: 'Clinical',
-    price: 299,
-    coins: 300000,
-    bonus: 50000,
+    name: 'Clinical Suite',
+    price: 149,
+    period: '/mo',
     color: 'rose',
-    badge: 'Maximum',
-    description: 'Full clinical review arsenal for board exam',
-    perQ: { budget: 70000, standard: 3500, premium: 1750 },
+    badge: 'Full Access',
+    description: 'Complete clinical arsenal — everything for board domination.',
+    highlight: false,
+    features: [
+      'Everything in Pro',
+      '100-item Mock Board Simulator',
+      'Pharmacology Q-Pack',
+      'Planner & tracker suite',
+      'Interactive mnemonics archive',
+      'Priority support',
+    ],
   },
 ];
 
-const MODELS = [
-  { key: 'budget', label: 'Llama 3.2 Budget', cost: 5, raw: '₱0.005/1k tokens', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-  { key: 'standard', label: 'Claude Haiku 4.5', cost: 100, raw: '₱0.17/1k tokens', color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' },
-  { key: 'premium', label: 'Gemini 2.0 Flash', cost: 200, raw: '₱0.30/1k tokens', color: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-200' },
-];
-
 export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile }) => {
-  const [loadingPkg, setLoadingPkg] = useState<string | null>(null);
-  const [pendingLink, setPendingLink] = useState<{ link_id: string; coins: number; pkg: string } | null>(() => {
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [pendingLink, setPendingLink] = useState<{ link_id: string; plan: string; planName: string } | null>(() => {
     try {
-      const s = localStorage.getItem('bp_pending_payment');
+      const s = localStorage.getItem('bp_pending_sub');
       return s ? JSON.parse(s) : null;
     } catch { return null; }
   });
@@ -61,30 +75,38 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
   const [verifyMsg, setVerifyMsg] = useState('');
   const [error, setError] = useState('');
 
-  const coins = profile.coins ?? 0;
+  const currentTier = profile.tier || 'Clinical Trial';
+  const isActive = (planId: string) => {
+    if (planId === 'free') return currentTier === 'Clinical Trial' || currentTier === 'Free';
+    if (planId === 'pro') return currentTier === 'Pro';
+    if (planId === 'clinical') return currentTier === 'Clinical';
+    return false;
+  };
 
-  const handleBuy = async (pkgId: string) => {
-    setLoadingPkg(pkgId);
+  const handleSubscribe = async (planId: string) => {
+    if (planId === 'free') return;
+    setLoadingPlan(planId);
     setError('');
     try {
       const res = await fetch('/api/paymongo/create-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: pkgId, email: profile.email }),
+        body: JSON.stringify({ packageId: planId, email: profile.email }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || 'Could not create payment link.');
         return;
       }
-      const pending = { link_id: data.link_id, coins: data.coins, pkg: pkgId };
+      const planName = PLANS.find(p => p.id === planId)?.name ?? planId;
+      const pending = { link_id: data.link_id, plan: planId, planName };
       setPendingLink(pending);
-      localStorage.setItem('bp_pending_payment', JSON.stringify(pending));
+      localStorage.setItem('bp_pending_sub', JSON.stringify(pending));
       window.open(data.checkout_url, '_blank');
     } catch {
       setError('Network error — please try again.');
     } finally {
-      setLoadingPkg(null);
+      setLoadingPlan(null);
     }
   };
 
@@ -100,21 +122,19 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
         body: JSON.stringify({ link_id: pendingLink.link_id, email: profile.email }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Verification failed.');
-        return;
-      }
+      if (!res.ok) { setError(data.error || 'Verification failed.'); return; }
       if (data.paid) {
+        const newTier = pendingLink.plan === 'pro' ? 'Pro' : 'Clinical';
         setProfile(prev => {
-          const updated = { ...prev, coins: (prev.coins ?? 0) + pendingLink.coins };
+          const updated = { ...prev, tier: newTier as UserProfile['tier'] };
           localStorage.setItem(`bp_profile_${prev.email}`, JSON.stringify(updated));
           return updated;
         });
-        localStorage.removeItem('bp_pending_payment');
+        localStorage.removeItem('bp_pending_sub');
         setPendingLink(null);
-        setVerifyMsg(`🎉 Payment verified! ${pendingLink.coins.toLocaleString()} coins added to your account.`);
+        setVerifyMsg(`🎉 Subscription activated! You're now on ${pendingLink.planName}.`);
       } else {
-        setVerifyMsg(`Payment status: ${data.status || 'unpaid'}. Complete your payment then verify again.`);
+        setVerifyMsg(`Payment status: ${data.status || 'unpaid'}. Complete checkout then verify again.`);
       }
     } catch {
       setError('Network error during verification.');
@@ -125,24 +145,26 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
 
   const dismissPending = () => {
     setPendingLink(null);
-    localStorage.removeItem('bp_pending_payment');
+    localStorage.removeItem('bp_pending_sub');
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
 
-      {/* Coin balance hero */}
+      {/* Current tier hero */}
       <div className="bg-gradient-to-br from-pine to-pine-mid rounded-3xl p-6 text-center relative overflow-hidden shadow-xl border border-pine-light/20">
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-mint via-sage to-pine-light" />
-        <div className="relative space-y-2">
-          <Coins className="w-10 h-10 text-yellow-300 mx-auto" />
-          <div className="font-display text-4xl text-cream tracking-tight">
-            {coins.toLocaleString()}
+        <div className="relative space-y-1.5">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 border border-white/15 rounded-full text-[10px] font-black uppercase tracking-widest text-mint mb-1">
+            <ShieldCheck className="w-3 h-3" />
+            Current Plan
           </div>
-          <div className="text-xs text-mint/70 font-bold uppercase tracking-widest">Coin Balance</div>
-          <div className="text-[10px] text-mint/50 font-mono">
-            ≈ {Math.floor(coins / 5).toLocaleString()} Budget Qs · {Math.floor(coins / 100).toLocaleString()} Standard Qs · {Math.floor(coins / 200).toLocaleString()} Premium Qs
+          <div className="font-display text-3xl text-cream tracking-tight">{currentTier}</div>
+          <div className="text-[11px] text-mint/60 font-mono">
+            {currentTier === 'Pro' ? '₱79 / month · Full board prep suite'
+              : currentTier === 'Clinical' ? '₱149 / month · Complete clinical arsenal'
+              : 'Free access · Upgrade to unlock full board prep'}
           </div>
         </div>
       </div>
@@ -153,10 +175,10 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
           <Info className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
           <div className="flex-1 space-y-2">
             <p className="text-xs font-bold text-amber-800">
-              Pending payment detected — {pendingLink.coins.toLocaleString()} coins waiting
+              Pending payment — {pendingLink.planName} subscription
             </p>
             <p className="text-[10px] text-amber-700">
-              Complete your payment in the checkout tab, then click Verify Payment below.
+              Complete checkout in the new tab, then click Verify below to activate your plan.
             </p>
             <div className="flex gap-2 flex-wrap">
               <button
@@ -187,118 +209,113 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
         </p>
       )}
 
-      {/* Packages */}
+      {/* Plan cards */}
       <div>
-        <div className="text-center space-y-1 mb-5">
-          <h2 className="font-display text-2xl text-pine">Buy Coins</h2>
-          <p className="text-xs text-gray-500 font-medium">Pay-As-You-Go · No subscriptions · No expiry</p>
+        <div className="text-center space-y-1 mb-6">
+          <h2 className="font-display text-2xl text-pine">Choose Your Plan</h2>
+          <p className="text-xs text-gray-500 font-medium">Monthly subscription · Cancel anytime · Secure via PayMongo</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {PACKAGES.map(pkg => {
-            const totalCoins = pkg.coins + pkg.bonus;
-            const isAmber = pkg.color === 'amber';
-            const isRose = pkg.color === 'rose';
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {PLANS.map(plan => {
+            const active = isActive(plan.id);
+            const isAmber = plan.color === 'amber';
+            const isRose = plan.color === 'rose';
+            const isGray = plan.color === 'gray';
+
             return (
               <div
-                key={pkg.id}
+                key={plan.id}
                 className={`relative bg-white rounded-3xl p-6 flex flex-col shadow-sm border transition-all hover:-translate-y-0.5 hover:shadow-md ${
-                  isAmber ? 'border-2 border-amber-300' : isRose ? 'border border-rose-200 hover:border-rose-300' : 'border border-gray-200 hover:border-emerald-200'
-                }`}
+                  isAmber ? 'border-2 border-amber-300' :
+                  isRose  ? 'border border-rose-200 hover:border-rose-300' :
+                  'border border-gray-200 hover:border-gray-300'
+                } ${active ? 'ring-2 ring-offset-1 ring-pine/30' : ''}`}
               >
-                {isAmber && (
+                {isAmber && !active && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[8px] uppercase font-black px-3 py-1 rounded-full shadow">
                     ★ Best Value
                   </div>
                 )}
+                {active && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-pine text-cream text-[8px] uppercase font-black px-3 py-1 rounded-full shadow">
+                    ✓ Active Plan
+                  </div>
+                )}
 
-                <div className="space-y-3 flex-1">
-                  <span className={`text-[9px] uppercase font-bold px-3 py-1 rounded-full border w-max block ${
-                    isAmber ? 'bg-amber-50 text-amber-800 border-amber-200' :
-                    isRose ? 'bg-rose-50 text-rose-800 border-rose-200' :
-                    'bg-emerald-50 text-emerald-800 border-emerald-200'
-                  }`}>
-                    {pkg.badge}
-                  </span>
+                <div className="space-y-4 flex-1">
+                  <div className="flex items-center gap-2">
+                    {isGray  && <BookOpen className="w-4 h-4 text-gray-400" />}
+                    {isAmber && <Award className="w-4 h-4 text-amber-500" />}
+                    {isRose  && <Zap className="w-4 h-4 text-rose-500 animate-pulse" />}
+                    <span className={`text-[9px] uppercase font-bold px-2.5 py-0.5 rounded-full border ${
+                      isAmber ? 'bg-amber-50 text-amber-800 border-amber-200' :
+                      isRose  ? 'bg-rose-50 text-rose-800 border-rose-200' :
+                      'bg-gray-100 text-gray-600 border-gray-200'
+                    }`}>
+                      {plan.badge}
+                    </span>
+                  </div>
 
                   <div>
-                    <h3 className="font-display text-xl text-pine">{pkg.name} Tier</h3>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{pkg.description}</p>
+                    <h3 className="font-display text-xl text-pine">{plan.name}</h3>
+                    <p className="text-[10px] text-gray-400 mt-0.5">{plan.description}</p>
                   </div>
 
-                  <div className="py-2 border-b border-gray-50">
-                    <span className="font-display text-3xl text-gray-900">₱{pkg.price}</span>
-                    <span className="text-[9px] font-bold text-gray-400 ml-1">one-time</span>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <Coins className="w-4 h-4 text-yellow-500 flex-shrink-0" />
-                      <span className="text-sm font-bold text-gray-800">
-                        {pkg.coins.toLocaleString()} coins
-                      </span>
-                    </div>
-                    {pkg.bonus > 0 && (
-                      <div className="flex items-center gap-2">
-                        <Zap className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                        <span className="text-xs font-bold text-amber-700">+{pkg.bonus.toLocaleString()} bonus coins</span>
-                      </div>
+                  <div className="pb-3 border-b border-gray-50">
+                    {plan.price === 0 ? (
+                      <span className="font-display text-3xl text-gray-700">Free</span>
+                    ) : (
+                      <>
+                        <span className="font-display text-3xl text-gray-900">₱{plan.price}</span>
+                        <span className="text-[10px] font-bold text-gray-400 ml-1">{plan.period}</span>
+                      </>
                     )}
-                    <div className="text-[10px] text-gray-400 font-mono mt-1">
-                      Total: {totalCoins.toLocaleString()} coins
-                    </div>
-                    <ul className="text-[10px] text-gray-500 space-y-0.5 pt-1">
-                      <li className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-emerald-400" />{pkg.perQ.budget.toLocaleString()} Budget questions</li>
-                      <li className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-emerald-400" />{pkg.perQ.standard.toLocaleString()} Standard questions</li>
-                      <li className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-emerald-400" />{pkg.perQ.premium.toLocaleString()} Premium questions</li>
-                    </ul>
                   </div>
+
+                  <ul className="space-y-2">
+                    {plan.features.map((f, i) => (
+                      <li key={i} className="flex items-start gap-2 text-[11px] text-gray-600">
+                        <CheckCircle className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${
+                          isAmber ? 'text-amber-500' : isRose ? 'text-rose-500' : 'text-emerald-400'
+                        }`} />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
 
-                <button
-                  onClick={() => handleBuy(pkg.id)}
-                  disabled={!!loadingPkg}
-                  className={`w-full py-2.5 font-bold text-xs uppercase tracking-widest rounded-xl mt-5 cursor-pointer shadow transition active:scale-95 flex items-center justify-center gap-2 ${
-                    isAmber ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-white hover:shadow-md' :
-                    isRose ? 'bg-gradient-to-r from-rose-600 to-red-500 text-white hover:shadow-md' :
-                    'bg-gradient-to-r from-emerald-600 to-teal-500 text-white hover:shadow-md'
-                  } disabled:opacity-60 disabled:cursor-not-allowed`}
-                >
-                  {loadingPkg === pkg.id ? (
-                    <><Loader2 className="w-3.5 h-3.5 animate-spin" />Creating link…</>
-                  ) : (
-                    <><ExternalLink className="w-3.5 h-3.5" />Buy via GCash / Card</>
-                  )}
-                </button>
+                {plan.id === 'free' ? (
+                  <div className={`w-full py-2.5 text-center font-bold text-xs uppercase tracking-widest rounded-xl mt-5 border ${
+                    active ? 'bg-pine/5 border-pine/20 text-pine' : 'bg-gray-50 border-gray-200 text-gray-400'
+                  }`}>
+                    {active ? 'Current Plan' : 'No action needed'}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => handleSubscribe(plan.id)}
+                    disabled={!!loadingPlan || active}
+                    className={`w-full py-2.5 font-bold text-xs uppercase tracking-widest rounded-xl mt-5 cursor-pointer shadow transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed ${
+                      active
+                        ? 'bg-pine/10 text-pine border border-pine/20'
+                        : isAmber
+                        ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-white hover:shadow-md'
+                        : 'bg-gradient-to-r from-rose-600 to-red-500 text-white hover:shadow-md'
+                    }`}
+                  >
+                    {active ? '✓ Subscribed' :
+                      loadingPlan === plan.id ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" />Creating link…</>
+                      ) : (
+                        <><ExternalLink className="w-3.5 h-3.5" />Subscribe via GCash / Card</>
+                      )
+                    }
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
-      </div>
-
-      {/* Model pricing table */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-        <h3 className="font-heading font-black text-pine text-xs uppercase tracking-widest mb-4 flex items-center gap-2">
-          <Zap className="w-4 h-4 text-sage" />
-          AI Model Coin Pricing
-        </h3>
-        <div className="space-y-2">
-          {MODELS.map(m => (
-            <div key={m.key} className={`flex items-center justify-between border rounded-xl px-4 py-3 ${m.bg} ${m.border}`}>
-              <div>
-                <span className={`text-xs font-bold ${m.color}`}>{m.label}</span>
-                <p className="text-[10px] text-gray-400 font-mono">{m.raw}</p>
-              </div>
-              <div className="text-right">
-                <span className={`font-display text-lg ${m.color}`}>{m.cost}</span>
-                <span className="text-[10px] text-gray-400 ml-1 font-mono">coins/Q</span>
-              </div>
-            </div>
-          ))}
-        </div>
-        <p className="text-[10px] text-gray-400 font-mono mt-3 text-center">
-          Coin cost is charged per question generated. Unused coins never expire.
-        </p>
       </div>
 
       {/* PayMongo note */}
@@ -308,9 +325,12 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
           Secure Philippine payments via GCash, Maya, credit/debit cards &amp; more.
         </p>
         <p className="text-[9px] text-blue-500 font-mono">
-          After checkout, click "Verify Payment" to instantly credit your coins.
+          After checkout, click "Verify Payment" above to instantly activate your subscription.
         </p>
       </div>
+
+      {/* Plan comparison infographic */}
+      <PlanInfographic />
 
     </div>
   );
