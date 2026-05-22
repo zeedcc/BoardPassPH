@@ -622,7 +622,7 @@ export default function App() {
     { id: 'billingTab', label: 'Plans', icon: CreditCard },
   ];
 
-  const isAdmin = profile.email === 'admin@boardpassph.com' || profile.email === 'test@test.com';
+  const isAdmin = profile.email === 'studyfilesbyz@gmail.com';
 
   const allNavTabs = [
     ...tabs,
