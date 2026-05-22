@@ -63,13 +63,16 @@ export const Header: React.FC<HeaderProps> = ({ profile, onNavigate, theme, onTh
           <div className="relative">
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="flex items-center gap-2 px-3.5 py-2 bg-pine-mid/95 hover:bg-pine-light/80 border border-pine-light/30 hover:border-mint text-cream font-mono text-xs rounded-full transition-all cursor-pointer shadow-sm select-none"
-              title="Select Workspace Palette style"
+              className="flex items-center gap-2 px-3 py-2 bg-pine-mid/95 hover:bg-pine-light/80 border border-pine-light/30 hover:border-mint text-cream rounded-full transition-all cursor-pointer shadow-sm select-none"
+              title="Change theme"
             >
-              <Palette className="w-3.5 h-3.5 text-mint animate-pulse" />
-              <span className="text-[11px] font-bold uppercase tracking-wide">
-                🎨 Theme: {THEME_OPTIONS.find(t => t.id === theme)?.emoji || '🍓🍵'}
+              <Palette className="w-4 h-4 text-mint" />
+              <span className="hidden md:inline text-[11px] font-bold uppercase tracking-wide font-mono">
+                Theme
               </span>
+              <span className="w-3 h-3 rounded-full border-2 border-white/30 shrink-0"
+                style={{ background: THEME_OPTIONS.find(t => t.id === theme)?.accent.replace('bg-[', '').replace(']', '') || '#E5526C' }}
+              />
             </button>
 
             {dropdownOpen && (

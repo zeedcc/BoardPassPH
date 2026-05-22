@@ -408,24 +408,29 @@ export default function App() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-pine via-pine-mid to-[#091b14] flex flex-col justify-center items-center p-6 relative overflow-hidden transition-all duration-300">
         
-        <div className="absolute top-6 right-6 z-50 flex items-center gap-1.5 bg-pine-mid/90 border border-pine-light/35 backdrop-blur px-3 py-1.5 rounded-full shadow-lg">
-          <span className="text-[10px] uppercase font-bold text-mint/90 tracking-wider mr-1 hidden sm:inline select-none font-mono">
-            🎨 Select Style:
-          </span>
-          {THEME_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              onClick={() => handleThemeChange(opt.id)}
-              className={`w-8 h-8 flex items-center justify-center rounded-full text-sm transition-all duration-150 cursor-pointer select-none active:scale-90 ${
-                theme === opt.id 
-                  ? 'bg-mint text-pine transform scale-110 shadow border border-white/20' 
-                  : 'hover:bg-pine-light/40 text-cream/70'
-              }`}
-              title={opt.name}
-            >
-              {opt.emoji}
-            </button>
-          ))}
+        <div className="absolute top-5 right-5 z-50 bg-pine-mid/90 border border-pine-light/30 backdrop-blur rounded-2xl shadow-xl px-4 py-3 flex flex-col gap-2.5 min-w-[120px]">
+          <span className="text-[9px] uppercase font-black text-mint/70 tracking-widest font-mono select-none text-center">Theme</span>
+          <div className="grid grid-cols-5 gap-1.5">
+            {[
+              { id: 'strawberry-matcha',   color: '#E5526C', label: 'Berry'  },
+              { id: 'lilac-dream',          color: '#9C85E5', label: 'Lilac'  },
+              { id: 'winter',               color: '#50A3EF', label: 'Frost'  },
+              { id: 'pastel-pink-coquette', color: '#EC9FA5', label: 'Rose'   },
+              { id: 'red-blush',            color: '#F43F5E', label: 'Blush'  },
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => handleThemeChange(opt.id)}
+                title={opt.label}
+                className="flex flex-col items-center gap-1 cursor-pointer select-none group"
+              >
+                <span
+                  className={`w-8 h-8 rounded-xl block transition-all duration-150 shadow-sm border-2 ${theme === opt.id ? 'border-white scale-110 shadow-md' : 'border-white/20 group-hover:border-white/60 group-hover:scale-105'}`}
+                  style={{ background: opt.color }}
+                />
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none" />
@@ -706,6 +711,35 @@ export default function App() {
                 <span className="text-[9px] text-cream/50 font-mono">
                   ⚡ {profile.streak}d streak
                 </span>
+              </div>
+            </div>
+
+            {/* Theme picker */}
+            <div className="px-5 py-4 border-b border-white/10 shrink-0">
+              <p className="text-[9px] uppercase tracking-[0.25em] font-black text-sage/70 mb-3 font-mono">Workspace Theme</p>
+              <div className="grid grid-cols-5 gap-2">
+                {[
+                  { id: 'strawberry-matcha',    color: '#E5526C', label: 'Berry'    },
+                  { id: 'lilac-dream',           color: '#9C85E5', label: 'Lilac'    },
+                  { id: 'winter',                color: '#50A3EF', label: 'Frost'    },
+                  { id: 'pastel-pink-coquette',  color: '#EC9FA5', label: 'Rose'     },
+                  { id: 'red-blush',             color: '#F43F5E', label: 'Blush'    },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => handleThemeChange(opt.id)}
+                    className="flex flex-col items-center gap-1 cursor-pointer select-none group"
+                    title={opt.label}
+                  >
+                    <span
+                      className={`w-9 h-9 rounded-xl border-2 transition-all duration-150 block shadow-sm ${theme === opt.id ? 'border-white scale-110 shadow-md' : 'border-white/20 group-hover:border-white/50 group-hover:scale-105'}`}
+                      style={{ background: opt.color }}
+                    />
+                    <span className={`text-[8px] font-bold uppercase tracking-wide transition-all ${theme === opt.id ? 'text-cream' : 'text-cream/40 group-hover:text-cream/70'}`}>
+                      {opt.label}
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
 
