@@ -88,7 +88,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
     setLoadingPlan(planId);
     setError('');
     try {
-      const res = await fetch('/api/paymongo/create-link', {
+      const res = await fetch('pk_live_bRDZmWv5e9LVUPgCfz39f5cy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ packageId: planId, email: profile.email }),
