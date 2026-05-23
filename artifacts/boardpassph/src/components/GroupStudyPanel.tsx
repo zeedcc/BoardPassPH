@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Users, Copy, Check, LogOut, Crown, Play, ChevronRight,
-  Loader2, Radio, BookOpen, RotateCcw, Trophy, Wifi, WifiOff
+  Loader2, Radio, BookOpen, RotateCcw, Trophy, WifiOff,
+  MessageCircle, Send, X,
 } from 'lucide-react';
 import { UserProfile, Question } from '../types';
 import { db } from '../firebase';
@@ -12,6 +13,11 @@ import {
   onSnapshot,
   updateDoc,
   serverTimestamp,
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  limit,
 } from 'firebase/firestore';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -33,6 +39,14 @@ interface RoomDoc {
   status: 'waiting' | 'active' | 'reveal' | 'finished';
   currentQuestion: Question | null;
   createdAt: unknown;
+}
+
+interface ChatMessage {
+  id: string;
+  senderEmail: string;
+  senderUsername: string;
+  text: string;
+  timestamp: number;
 }
 
 interface GroupStudyPanelProps {
@@ -78,11 +92,21 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
   const [copied, setCopied] = useState(false);
   const [advancing, setAdvancing] = useState(false);
 
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatOpen, setChatOpen] = useState(true);
+  const [sendingChat, setSendingChat] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatUnsub = useRef<(() => void) | null>(null);
+  const lastSeenCount = useRef(0);
+
   const unsubRef = useRef<(() => void) | null>(null);
 
   const myUsername = profile.username || profile.email.split('@')[0];
 
-  // ── Firestore listener ─────────────────────────────────────────────────
+  // ── Firestore room listener ─────────────────────────────────────────────
 
   useEffect(() => {
     if (!roomId) return;
@@ -109,6 +133,55 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
     unsubRef.current = unsub;
     return () => unsub();
   }, [roomId]);
+
+  // ── Firestore chat listener ─────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!roomId) {
+      setChatMessages([]);
+      return;
+    }
+
+    const messagesRef = collection(db, 'groupRooms', roomId, 'messages');
+    const q = query(messagesRef, orderBy('timestamp', 'asc'), limit(200));
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const msgs: ChatMessage[] = snap.docs.map(d => ({
+          id: d.id,
+          ...(d.data() as Omit<ChatMessage, 'id'>),
+        }));
+        setChatMessages(msgs);
+
+        // Track unread when chat is closed
+        if (!chatOpen) {
+          const newCount = msgs.length - lastSeenCount.current;
+          if (newCount > 0) setUnreadCount(prev => prev + newCount);
+        }
+        lastSeenCount.current = msgs.length;
+      },
+      (err) => console.error('chat onSnapshot error:', err)
+    );
+
+    chatUnsub.current = unsub;
+    return () => unsub();
+  }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-scroll chat to bottom on new messages
+  useEffect(() => {
+    if (chatOpen && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chatMessages, chatOpen]);
+
+  // Clear unread when opening chat
+  useEffect(() => {
+    if (chatOpen) {
+      setUnreadCount(0);
+      lastSeenCount.current = chatMessages.length;
+    }
+  }, [chatOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset selected answer when question index changes
   useEffect(() => {
@@ -205,7 +278,6 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
         status: 'active',
       });
     } catch {
-      // Fallback: use a placeholder question
       const fallback: Question = {
         category: 'Psychology',
         vignette: 'Which theoretical framework emphasizes unconscious processes and early childhood experiences as central to personality development?',
@@ -226,7 +298,6 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
     if (!isHost || !roomId) return;
     setAdvancing(true);
     const roomRef = doc(db, 'groupRooms', roomId);
-    // Reset all participant scores & answers
     const resetParticipants = (roomData?.participants ?? []).map(p => ({ ...p, score: 0, answeredIndex: null }));
     await updateDoc(roomRef, { participants: resetParticipants });
     await fetchAndStoreQuestion(roomRef, 0);
@@ -236,7 +307,7 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
   const handleSubmitAnswer = async (idx: number) => {
     if (!roomId || !roomData || roomData.status !== 'active') return;
     const me = roomData.participants.find(p => p.email === profile.email);
-    if (!me || me.answeredIndex !== null) return; // already answered
+    if (!me || me.answeredIndex !== null) return;
 
     setSelectedAnswer(idx);
     const roomRef = doc(db, 'groupRooms', roomId);
@@ -249,7 +320,6 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
 
     await updateDoc(roomRef, { participants: updated });
 
-    // If host and everyone answered, auto-reveal
     if (isHost) {
       const allAnswered = updated.every(p => p.answeredIndex !== null);
       if (allAnswered) {
@@ -281,8 +351,13 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
 
   const handleLeaveRoom = () => {
     unsubRef.current?.();
+    chatUnsub.current?.();
     setRoomId('');
     setRoomData(null);
+    setChatMessages([]);
+    setChatInput('');
+    setUnreadCount(0);
+    lastSeenCount.current = 0;
     setPhase('lobby');
     setJoinCodeInput('');
     setSelectedAnswer(null);
@@ -295,11 +370,134 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // ── Chat actions ───────────────────────────────────────────────────────
+
+  const handleSendChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = chatInput.trim();
+    if (!text || !roomId || sendingChat) return;
+    setSendingChat(true);
+    setChatInput('');
+    try {
+      await addDoc(collection(db, 'groupRooms', roomId, 'messages'), {
+        senderEmail: profile.email,
+        senderUsername: myUsername,
+        text,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      console.error('chat send error:', err);
+      setChatInput(text);
+    } finally {
+      setSendingChat(false);
+    }
+  };
+
   // ── Derived ────────────────────────────────────────────────────────────
 
   const me = roomData?.participants.find(p => p.email === profile.email);
   const sortedParticipants = roomData ? [...roomData.participants].sort((a, b) => b.score - a.score) : [];
   const totalAnswered = roomData?.participants.filter(p => p.answeredIndex !== null).length ?? 0;
+
+  // ── Chat panel (shared across all room phases) ─────────────────────────
+
+  const ChatPanel = () => (
+    <div className="bg-white rounded-2xl border border-pine/10 shadow-sm overflow-hidden">
+      {/* Chat header / toggle */}
+      <button
+        onClick={() => setChatOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-foam/60 transition cursor-pointer"
+      >
+        <div className="flex items-center gap-2">
+          <MessageCircle className="w-4 h-4 text-mint" />
+          <span className="text-[10px] uppercase font-black text-pine/60 tracking-widest font-mono">
+            Room Chat
+          </span>
+          {chatMessages.length > 0 && (
+            <span className="text-[9px] font-mono text-pine/30">
+              {chatMessages.length} msg{chatMessages.length !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {!chatOpen && unreadCount > 0 && (
+            <span className="px-2 py-0.5 bg-mint text-pine text-[9px] font-black rounded-full animate-pulse">
+              {unreadCount} new
+            </span>
+          )}
+          {chatOpen
+            ? <X className="w-3.5 h-3.5 text-pine/30" />
+            : <MessageCircle className="w-3.5 h-3.5 text-pine/30" />
+          }
+        </div>
+      </button>
+
+      {chatOpen && (
+        <>
+          {/* Messages scroll area */}
+          <div
+            ref={chatScrollRef}
+            className="h-48 overflow-y-auto px-4 py-2 space-y-2 bg-foam/30 border-t border-pine/5"
+          >
+            {chatMessages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-1.5 text-center">
+                <MessageCircle className="w-6 h-6 text-pine/15" />
+                <p className="text-[10px] text-pine/30 font-mono">No messages yet — say hi!</p>
+              </div>
+            ) : (
+              chatMessages.map(msg => {
+                const isMe = msg.senderEmail === profile.email;
+                return (
+                  <div key={msg.id} className={`flex gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                    {/* Avatar */}
+                    <div className="w-6 h-6 rounded-full bg-pine/10 border border-pine/15 flex items-center justify-center text-[9px] font-black text-pine/50 shrink-0 uppercase">
+                      {msg.senderUsername.slice(0, 1)}
+                    </div>
+                    <div className={`flex flex-col gap-0.5 max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
+                      {!isMe && (
+                        <span className="text-[9px] font-bold text-pine/40 font-mono px-1">
+                          {msg.senderUsername}
+                        </span>
+                      )}
+                      <div className={`px-3 py-1.5 rounded-2xl text-xs leading-snug font-medium break-words ${
+                        isMe
+                          ? 'bg-pine text-cream rounded-tr-sm'
+                          : 'bg-white border border-pine/10 text-pine rounded-tl-sm'
+                      }`}>
+                        {msg.text}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Input bar */}
+          <form onSubmit={handleSendChat} className="flex items-center gap-2 px-3 py-2.5 border-t border-pine/8">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              placeholder="Type a message…"
+              maxLength={300}
+              className="flex-1 bg-foam border border-pine/15 text-xs text-pine placeholder-pine/30 px-3 py-2 rounded-xl outline-none focus:border-mint focus:ring-2 focus:ring-mint/10 transition-all"
+            />
+            <button
+              type="submit"
+              disabled={!chatInput.trim() || sendingChat}
+              className="w-8 h-8 bg-pine hover:bg-pine-mid disabled:opacity-40 text-cream rounded-xl flex items-center justify-center shrink-0 transition cursor-pointer disabled:cursor-not-allowed"
+            >
+              {sendingChat
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <Send className="w-3.5 h-3.5" />
+              }
+            </button>
+          </form>
+        </>
+      )}
+    </div>
+  );
 
   // ══════════════════════════════════════════════════════════════════════
   // RENDER: LOBBY
@@ -413,6 +611,7 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
             { icon: '🏠', text: 'Host creates a room and shares the 6-character code' },
             { icon: '👥', text: 'Reviewees join with the code — everyone syncs instantly' },
             { icon: '🧠', text: 'AI generates 10 questions; everyone answers simultaneously' },
+            { icon: '💬', text: 'Chat with roommates in real time while reviewing' },
             { icon: '🏆', text: 'Scores update live — leaderboard reveals after each round' },
           ].map((item, i) => (
             <div key={i} className="flex items-start gap-3">
@@ -552,6 +751,7 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
           </div>
         </div>
         <ParticipantsList />
+        <ChatPanel />
         {isHost && (
           <button
             onClick={handleStartGame}
@@ -598,6 +798,8 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
           ))}
         </div>
 
+        <ChatPanel />
+
         <div className="grid grid-cols-2 gap-3">
           {isHost && (
             <button
@@ -631,6 +833,7 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
           <span className="text-sm font-medium">Loading question...</span>
         </div>
         <ParticipantsList compact />
+        <ChatPanel />
       </div>
     );
   }
@@ -722,6 +925,9 @@ export function GroupStudyPanel({ profile }: GroupStudyPanelProps) {
 
       {/* Participants compact */}
       <ParticipantsList compact />
+
+      {/* Chat */}
+      <ChatPanel />
 
       {/* Host controls */}
       {isHost && (
