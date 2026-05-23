@@ -209,10 +209,6 @@ export const FeedbackPanel: React.FC<FeedbackPanelProps> = ({ profile }) => {
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2 className="w-3.5 h-3.5 text-sage flex-shrink-0 mt-0.5" />
-                  <span>Licensed mental health clinicians backing questions.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-sage flex-shrink-0 mt-0.5" />
                   <span>Responsive alignment with professional curriculum.</span>
                 </li>
               </ul>
