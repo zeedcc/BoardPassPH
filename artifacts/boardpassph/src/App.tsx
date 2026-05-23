@@ -44,7 +44,7 @@ import { WeightedCalculatorPanel } from './components/WeightedCalculatorPanel';
 import { AnnouncementsPanel } from './components/AnnouncementsPanel';
 import { ProfilePanel } from './components/ProfilePanel';
 import { getRandomLocalQuestion } from './utils/questionGenerator';
-import { db, firestoreWithTimeout } from './firebase';
+import { db, firestoreWithTimeout, auth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, onAuthStateChanged } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const THEME_OPTIONS = [
@@ -69,11 +69,6 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordHintInput, setPasswordHintInput] = useState('');
   const [recoveryEmail, setRecoveryEmail] = useState('');
-  const [recoveryStep, setRecoveryStep] = useState<'email' | 'reset'>('email');
-  const [recoveredProfile, setRecoveredProfile] = useState<UserProfile | null>(null);
-  const [newPasswordInput, setNewPasswordInput] = useState('');
-  const [recoveryOtp, setRecoveryOtp] = useState('');
-  const [enteredRecoveryOtp, setEnteredRecoveryOtp] = useState('');
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -81,6 +76,33 @@ export default function App() {
   }, [theme]);
 
   const [syncStatus, setSyncStatus] = useState<'syncing' | 'synced'>('synced');
+
+  // Auto-login: listen to Firebase Auth state changes
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser?.email) {
+        const emailLower = fbUser.email.toLowerCase().trim();
+        let storedProfile: UserProfile | null = null;
+        try {
+          const docSnap = await firestoreWithTimeout(getDoc(doc(db, 'profiles', emailLower)));
+          if (docSnap.exists()) storedProfile = docSnap.data() as UserProfile;
+        } catch { /* silent */ }
+        if (!storedProfile) {
+          const local = localStorage.getItem(`bp_profile_${emailLower}`);
+          if (local) storedProfile = JSON.parse(local);
+        }
+        if (storedProfile) {
+          if (storedProfile.theme) setTheme(storedProfile.theme);
+          setProfile(storedProfile);
+          setEmailInput(emailLower);
+          setActiveTab('plannerTab');
+        }
+      } else if (!profile) {
+        // User signed out — keep showing login screen
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // Push notifications
   const { permission, subscribed, requesting, subscribe, dismissBanner, isBannerDismissed } = usePushNotifications();
@@ -132,7 +154,6 @@ export default function App() {
     const todayStr = new Date().toISOString().split('T')[0];
     
     let storedProfile: UserProfile | null = null;
-    let fallbackUsed = false;
 
     try {
       const docRef = doc(db, 'profiles', emailLower);
@@ -147,7 +168,6 @@ export default function App() {
     const localStored = localStorage.getItem(`bp_profile_${emailLower}`);
     if (!storedProfile && localStored) {
       storedProfile = JSON.parse(localStored);
-      fallbackUsed = true;
     }
 
     if (authMode === 'signup') {
@@ -158,6 +178,18 @@ export default function App() {
       if (storedProfile) {
         alert("⚠️ Email already registered! Switching to \"Sign In\" so you can enter the board room.");
         setAuthMode('login');
+        return;
+      }
+
+      try {
+        await createUserWithEmailAndPassword(auth, emailLower, passwordInput);
+      } catch (err: any) {
+        if (err.code === 'auth/email-already-in-use') {
+          alert("⚠️ Email already registered in Firebase Auth! Switching to \"Sign In\".");
+          setAuthMode('login');
+          return;
+        }
+        alert(`Auth error: ${err.message || err.code}`);
         return;
       }
 
@@ -186,14 +218,13 @@ export default function App() {
 
       try {
         setSyncStatus('syncing');
-        const docRef = doc(db, 'profiles', emailLower);
-        await firestoreWithTimeout(setDoc(docRef, newProfile));
+        await firestoreWithTimeout(setDoc(doc(db, 'profiles', emailLower), newProfile));
         setSyncStatus('synced');
         alert("🎉 Cloud Account Created Successfully! Welcome to BoardPassPH.");
       } catch (err) {
         setSyncStatus('synced');
-        console.warn('Fallen back to local sandbox context:', err);
-        alert("🎉 Account Created Successfully! Saved on local sandbox context.");
+        console.warn('Firestore write failed after auth creation:', err);
+        alert("🎉 Account Created! Data saved locally. Firestore sync may be restricted by security rules.");
       }
 
       setProfile(newProfile);
@@ -204,20 +235,42 @@ export default function App() {
     }
 
     if (authMode === 'login') {
-      if (!storedProfile) {
-        alert("⚠️ Reviewee email not registered! Type your email and select \"Sign Up\" first to create your board credentials.");
-        setAuthMode('signup');
-        return;
-      }
-
-      if (storedProfile.password) {
-        if (storedProfile.password !== passwordInput) {
-          alert("❌ Incorrect password! Please verify your password. If forgotten, select the \"Forgot Password\" utility.");
+      try {
+        await signInWithEmailAndPassword(auth, emailLower, passwordInput);
+      } catch (err: any) {
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+          // No Firebase Auth account — fallback to legacy local-only profile
+          if (!storedProfile) {
+            alert("⚠️ Reviewee email not registered! Type your email and select \"Sign Up\" first to create your board credentials.");
+            setAuthMode('signup');
+            return;
+          }
+          // Legacy profile exists but no Firebase Auth — create the auth user silently
+          try {
+            await createUserWithEmailAndPassword(auth, emailLower, passwordInput);
+            alert("🔐 Migrated your local profile to Firebase Auth. Welcome back!");
+          } catch (createErr: any) {
+            alert(`Legacy migration failed: ${createErr.message || createErr.code}`);
+            return;
+          }
+        } else {
+          alert(`Login failed: ${err.message || err.code}`);
           return;
         }
-      } else {
-        storedProfile.password = passwordInput || '123456';
-        storedProfile.passwordHint = 'Legacy Auto-Set Hint';
+      }
+
+      // Auth succeeded — reload profile from Firestore (or local fallback)
+      if (!storedProfile) {
+        const local = localStorage.getItem(`bp_profile_${emailLower}`);
+        if (local) {
+          storedProfile = JSON.parse(local);
+        }
+      }
+
+      if (!storedProfile) {
+        alert("⚠️ Profile not found in cloud or local storage. Please sign up first.");
+        setAuthMode('signup');
+        return;
       }
 
       if (storedProfile.lastDate && storedProfile.lastDate !== todayStr) {
@@ -225,7 +278,6 @@ export default function App() {
         const today = new Date(todayStr);
         const diffTime = Math.abs(today.getTime() - last.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
         if (diffDays > 1) {
           if (storedProfile.streakShields && storedProfile.streakShields > 0) {
             storedProfile.streakShields -= 1;
@@ -238,33 +290,24 @@ export default function App() {
           storedProfile.streak += 1;
         }
       }
-      
       storedProfile.lastDate = todayStr;
-      
-      if (storedProfile.theme) {
-        setTheme(storedProfile.theme);
-      } else {
-        storedProfile.theme = theme;
-      }
-
+      if (storedProfile.theme) setTheme(storedProfile.theme);
+      else storedProfile.theme = theme;
       if (!storedProfile.signUpDate) {
         storedProfile.signUpDate = storedProfile.lastDate || todayStr;
       }
-
       const storedNotes = localStorage.getItem(`bp_notes_${emailLower}`);
       if (storedNotes && (!storedProfile.notes || Object.keys(storedProfile.notes).length === 0)) {
         storedProfile.notes = JSON.parse(storedNotes);
       }
 
-      if (fallbackUsed) {
-        try {
-          setSyncStatus('syncing');
-          await firestoreWithTimeout(setDoc(doc(db, 'profiles', emailLower), storedProfile));
-          setSyncStatus('synced');
-        } catch (syncErr) {
-          setSyncStatus('synced');
-          console.warn('Deferred account migration sync:', syncErr);
-        }
+      try {
+        setSyncStatus('syncing');
+        await firestoreWithTimeout(setDoc(doc(db, 'profiles', emailLower), storedProfile));
+        setSyncStatus('synced');
+      } catch (syncErr) {
+        setSyncStatus('synced');
+        console.warn('Post-login Firestore sync failed:', syncErr);
       }
 
       setProfile(storedProfile);
@@ -303,69 +346,17 @@ export default function App() {
       return;
     }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const apiBase = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || '';
     try {
-      const res = await fetch(`${apiBase}/api/send-recovery-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipient_email: emailLower, otp }),
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(payload.error || 'Unable to send recovery email. Ensure the API server is running with MY_EMAIL and MY_PASSWORD set.');
-      }
-      alert('Recovery email sent. Check your inbox (and spam) for the OTP.');
-      setRecoveredProfile(loadedProfile);
-      setRecoveryOtp(otp);
-      setEnteredRecoveryOtp('');
-      setRecoveryStep('reset');
-    } catch (err) {
-      console.error('Recovery email failed', err);
-      const hint = err instanceof Error ? err.message : 'Email delivery failed';
-      alert(`${hint}\n\nFor local dev: run the API server (port 8080) and set MY_EMAIL + MY_PASSWORD (Gmail App Password).`);
+      await sendPasswordResetEmail(auth, emailLower);
+      alert("📧 Password reset email sent! Check your inbox (and spam) for the Firebase reset link.");
+    } catch (err: any) {
+      console.error('Firebase password reset failed', err);
+      alert(`Unable to send reset email: ${err.message || err.code}`);
     }
   };
 
-  const handlePasswordResetSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!enteredRecoveryOtp.trim()) {
-      alert('Enter the OTP sent to your recovery email.');
-      return;
-    }
-    if (enteredRecoveryOtp !== recoveryOtp) {
-      alert('Incorrect OTP. Please check the code in your email.');
-      return;
-    }
-    if (!newPasswordInput.trim()) {
-      alert("Reviewee password cannot be blank!");
-      return;
-    }
-    if (!recoveredProfile) return;
-
-    recoveredProfile.password = newPasswordInput;
-    localStorage.setItem(`bp_profile_${recoveredProfile.email}`, JSON.stringify(recoveredProfile));
-    
-    try {
-      setSyncStatus('syncing');
-      await firestoreWithTimeout(setDoc(doc(db, 'profiles', recoveredProfile.email), recoveredProfile));
-      setSyncStatus('synced');
-      alert("💚 Password reset successful! Cloud credentials synchronized. Log in below with your updated password.");
-    } catch (err) {
-      setSyncStatus('synced');
-      console.warn('Firestore cloud lock synchronized error:', err);
-      alert("💚 Password reset successful! Log in below with your updated password.");
-    }
-
-    setEmailInput(recoveredProfile.email);
-    setAuthMode('login');
-    setRecoveryEmail('');
-    setRecoveryStep('email');
-    setRecoveredProfile(null);
-    setNewPasswordInput('');
-  };
-
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { await signOut(auth); } catch { /* silent */ }
     setProfile(null);
     setCurrentQuestion(null);
     setEmailInput('');
@@ -540,7 +531,7 @@ export default function App() {
                     <div className="text-right mt-2">
                       <button
                         type="button"
-                        onClick={() => { setAuthMode('forgot'); setRecoveryEmail(''); setRecoveryStep('email'); setRecoveredProfile(null); }}
+                        onClick={() => { setAuthMode('forgot'); setRecoveryEmail(''); }}
                         className="text-xs text-mint/70 hover:text-mint font-mono"
                       >
                         Forgot Password?
@@ -572,97 +563,38 @@ export default function App() {
                 </button>
               </form>
             ) : (
-              <div className="space-y-4">
-                {recoveryStep === 'email' ? (
-                  <form onSubmit={handleForgotPasswordVerify} className="space-y-4">
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
-                        Enter Registered Email for Recovery
-                      </label>
-                      <input
-                        type="email"
-                        required
-                        value={recoveryEmail}
-                        onChange={(e) => setRecoveryEmail(e.target.value)}
-                        placeholder="name@example.com"
-                        className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
-                      />
-                    </div>
+              <form onSubmit={handleForgotPasswordVerify} className="space-y-4">
+                <div className="space-y-1.5 text-left">
+                  <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
+                    Enter Registered Email for Recovery
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={recoveryEmail}
+                    onChange={(e) => setRecoveryEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
+                  />
+                </div>
+                <p className="text-[10px] text-cream/50 -mt-2">Firebase will send a password-reset link to your email.</p>
 
-                    <div className="flex gap-2">
-                      <button
-                        type="submit"
-                        className="flex-1 py-3 bg-mint text-pine font-sans uppercase tracking-widest font-black text-xs rounded-xl shadow-md border-b-2 border-emerald-700"
-                      >
-                        Verify Email
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setAuthMode('login'); setRecoveryEmail(''); }}
-                        className="flex-1 py-3 bg-transparent text-cream/60 border border-pine-light/20 rounded-xl text-xs font-bold"
-                      >
-                        Back
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <form onSubmit={handlePasswordResetSubmit} className="space-y-4">
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
-                        Password Hint
-                      </label>
-                      <div className="text-xs text-cream/60 px-4 py-2.5 bg-pine border border-pine-light/30 rounded-xl">
-                        {recoveredProfile?.passwordHint ?? 'No password hint available.'}
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
-                        Recovery OTP
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={enteredRecoveryOtp}
-                        onChange={(e) => setEnteredRecoveryOtp(e.target.value)}
-                        placeholder="Enter the code from your email"
-                        className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
-                      />
-                      <p className="text-[10px] text-cream/50">A one-time recovery code was sent to your registered email.</p>
-                    </div>
-
-                    <div className="space-y-1.5 text-left">
-                      <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
-                        New Password
-                      </label>
-                      <input
-                        type="password"
-                        required
-                        value={newPasswordInput}
-                        onChange={(e) => setNewPasswordInput(e.target.value)}
-                        placeholder="Enter new password"
-                        className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
-                      />
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        type="submit"
-                        className="flex-1 py-3 bg-mint text-pine font-sans uppercase tracking-widest font-black text-xs rounded-xl shadow-md border-b-2 border-emerald-700"
-                      >
-                        Reset Password
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setAuthMode('login'); setRecoveryStep('email'); setRecoveredProfile(null); }}
-                        className="flex-1 py-3 bg-transparent text-cream/60 border border-pine-light/20 rounded-xl text-xs font-bold"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    className="flex-1 py-3 bg-mint text-pine font-sans uppercase tracking-widest font-black text-xs rounded-xl shadow-md border-b-2 border-emerald-700"
+                  >
+                    Send Reset Link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAuthMode('login'); setRecoveryEmail(''); }}
+                    className="flex-1 py-3 bg-transparent text-cream/60 border border-pine-light/20 rounded-xl text-xs font-bold"
+                  >
+                    Back
+                  </button>
+                </div>
+              </form>
             )}
           </div>
 

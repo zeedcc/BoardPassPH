@@ -1,5 +1,13 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  sendPasswordResetEmail,
+  onAuthStateChanged,
+  updatePassword,
+} from 'firebase/auth';
 import { getFirestore, doc } from 'firebase/firestore';
 import firebaseConfigRaw from '../firebase-applet-config.json';
 
@@ -22,6 +30,13 @@ export const db = useDefaultFirestore
   ? getFirestore(app)
   : getFirestore(app, firestoreDatabaseId);
 export const auth = getAuth();
+export {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  sendPasswordResetEmail,
+  onAuthStateChanged,
+};
 
 export async function firestoreWithTimeout<T>(operation: Promise<T>, timeoutMs = 4000): Promise<T> {
   return Promise.race([

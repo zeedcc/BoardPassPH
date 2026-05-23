@@ -2,7 +2,6 @@ import { Router } from "express";
 import { GoogleGenAI, Type } from "@google/genai";
 import crypto from "crypto";
 import webpush from 'web-push';
-import { sendRecoveryEmail } from "../../../../lib/recovery-email.mjs";
 import { SEED_QUESTIONS } from "../data/seedQuestions.js";
 
 const router = Router();
@@ -55,21 +54,6 @@ router.post('/push/send', async (req, res) => {
   } catch (err) {
     console.error('Push send error', err);
     return res.status(500).json({ error: 'Failed to send push' });
-  }
-});
-
-router.post('/send-recovery-email', async (req, res) => {
-  const { recipient_email, otp } = req.body;
-  if (!recipient_email || !otp) {
-    return res.status(400).json({ error: 'recipient_email and otp are required.' });
-  }
-  try {
-    await sendRecoveryEmail(recipient_email, otp);
-    return res.json({ message: 'Email sent successfully' });
-  } catch (error: unknown) {
-    console.error('Recovery email delivery failed', error);
-    const message = error instanceof Error ? error.message : 'Could not send recovery email.';
-    return res.status(500).json({ error: message });
   }
 });
 
