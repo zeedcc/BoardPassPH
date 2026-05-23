@@ -1,0 +1,70 @@
+import { useEffect, useState } from 'react';
+import { db } from '../lib/firebase'; // Adjust path to your Firebase initialization
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+
+export default function LiveGroupStudy({ roomId, currentUsername }) {
+  const [roomData, setRoomData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // 1. Reference the specific group study room document
+    const roomRef = doc(db, 'groups', roomId);
+
+    // 2. Open the real-time listener channel
+    const unsubscribe = onSnapshot(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setRoomData(snapshot.data());
+      } else {
+        console.error("Group study room not found.");
+      }
+      setLoading(false);
+    }, (error) => {
+      console.error("Realtime listener failed:", error);
+    });
+
+    // 3. CLEANUP: When the component unmounts (user leaves), close the connection
+    return () => unsubscribe();
+  }, [roomId]);
+
+  // Example Action: Moving to the next question live for everyone
+  const handleNextQuestion = async () => {
+    const roomRef = doc(db, 'groups', roomId);
+    await updateDoc(roomRef, {
+      currentQuestionIndex: (roomData.currentQuestionIndex || 0) + 1,
+      status: 'voting'
+    });
+    // NOTICE: We don't update local state here! 
+    // The live listener above will catch this Firestore update and change the UI for EVERYONE.
+  };
+
+  if (loading) return <p>Syncing with study group...</p>;
+
+  return (
+    <div className="p-6 bg-slate-900 text-white rounded-lg">
+      <h2 className="text-2xl font-bold mb-4">{roomData?.roomName}</h2>
+      
+      <div className="mb-6">
+        <h3 className="font-semibold text-gray-400">Active Reviewers:</h3>
+        <ul className="list-disc pl-5">
+          {roomData?.participants?.map((p: any, idx: number) => (
+            <li key={idx} className={p.username === currentUsername ? "text-green-400 font-bold" : ""}>
+              {p.username} — Score: {p.score} {p.isReady ? '✅' : '⏳'}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="bg-slate-800 p-4 rounded mb-4">
+        <p className="text-sm text-yellow-400">Current Progress</p>
+        <p className="text-lg">Answering Question #{roomData?.currentQuestionIndex + 1}</p>
+      </div>
+
+      <button 
+        onClick={handleNextQuestion}
+        className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded"
+      >
+        Next Question (Syncs Everyone)
+      </button>
+    </div>
+  );
+}

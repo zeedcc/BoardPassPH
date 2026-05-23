@@ -68,10 +68,22 @@ catalog:
 
 autoInstallPeers: false
 
+allowBuilds:
+  '@firebase/util': true
+  '@google/genai': true
+  '@tailwindcss/oxide': true
+  lightningcss: true
+  esbuild: true
+  protobufjs: true
+  rollup: true
+
 onlyBuiltDependencies:
+  - '@firebase/util'
+  - '@google/genai'
   - '@swc/core'
   - esbuild
   - msw
+  - protobufjs
   - unrs-resolver
 
 overrides:
