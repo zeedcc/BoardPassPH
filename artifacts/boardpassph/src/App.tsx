@@ -68,6 +68,8 @@ export default function App() {
   const [recoveryStep, setRecoveryStep] = useState<'email' | 'reset'>('email');
   const [recoveredProfile, setRecoveredProfile] = useState<UserProfile | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [recoveryOtp, setRecoveryOtp] = useState('');
+  const [enteredRecoveryOtp, setEnteredRecoveryOtp] = useState('');
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -158,7 +160,6 @@ export default function App() {
       const newProfile: UserProfile = {
         email: emailLower,
         tier: 'Clinical Trial',
-        coins: 1000,
         totalXp: 150,
         streak: 1,
         streakShields: 1,
@@ -296,12 +297,38 @@ export default function App() {
       return;
     }
 
-    setRecoveredProfile(loadedProfile);
-    setRecoveryStep('reset');
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    try {
+      const res = await fetch('/api/send-recovery-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipient_email: emailLower, otp }),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'Unable to send recovery email');
+      }
+      alert('Recovery email sent. Check your inbox for the OTP.');
+      setRecoveredProfile(loadedProfile);
+      setRecoveryOtp(otp);
+      setEnteredRecoveryOtp('');
+      setRecoveryStep('reset');
+    } catch (err) {
+      console.error('Recovery email failed', err);
+      alert('Unable to send recovery email at this time. Please try again later.');
+    }
   };
 
   const handlePasswordResetSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!enteredRecoveryOtp.trim()) {
+      alert('Enter the OTP sent to your recovery email.');
+      return;
+    }
+    if (enteredRecoveryOtp !== recoveryOtp) {
+      alert('Incorrect OTP. Please check the code in your email.');
+      return;
+    }
     if (!newPasswordInput.trim()) {
       alert("Reviewee password cannot be blank!");
       return;
@@ -354,7 +381,17 @@ export default function App() {
       if (profile.adaptive) {
         finalFocusArea += ` (Integrate specific emphasis on fields where correctness is historically lower than 75% accuracy)`;
       }
+      // auto subject accuracy: prioritize weakest subject if enabled
+      if (profile.autoSubjectAccuracy && profile.subjectAccuracy && Object.keys(profile.subjectAccuracy).length > 0) {
+        try {
+          const entries = Object.entries(profile.subjectAccuracy || {});
+          entries.sort((a, b) => a[1] - b[1]);
+          const weakest = entries[0]?.[0];
+          if (weakest) finalFocusArea += ` (Focus more on: ${weakest})`;
+        } catch (e) { /* ignore */ }
+      }
 
+      const previousQuestions = profile.rememberQuestionHistory ? (profile.questionHistory || []) : [];
       const res = await fetch("/api/generate-question", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -364,7 +401,8 @@ export default function App() {
           difficulty,
           fileData,
           fileMimeType,
-          model: selectedModel
+          model: selectedModel,
+          previousQuestions
         })
       });
 
@@ -466,57 +504,162 @@ export default function App() {
               </button>
             </div>
 
-            <form onSubmit={handleAuthSubmit} className="space-y-4">
-              <div className="space-y-1.5 text-left">
-                <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
-                  Registered Reviewee Email
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
-                />
-              </div>
-
-              <div className="space-y-1.5 text-left">
-                <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
-                  Security Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
-                />
-              </div>
-
-              {authMode === 'signup' && (
+            {authMode !== 'forgot' ? (
+              <form onSubmit={handleAuthSubmit} className="space-y-4">
                 <div className="space-y-1.5 text-left">
                   <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
-                    Password Hint (Display on Recovery)
+                    Registered Reviewee Email
                   </label>
                   <input
-                    type="text"
-                    value={passwordHintInput}
-                    onChange={(e) => setPasswordHintInput(e.target.value)}
-                    placeholder="e.g. My puppy name / mom bday"
+                    type="email"
+                    required
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="name@example.com"
                     className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
                   />
                 </div>
-              )}
 
-              <button
-                type="submit"
-                className="w-full mt-2 py-3 bg-mint text-pine font-sans uppercase tracking-widest font-black text-xs rounded-xl shadow-md cursor-pointer select-none border-b-2 border-emerald-700 hover:bg-white hover:scale-[1.01] active:scale-[0.99] transition-all"
-              >
-                {authMode === 'login' ? 'Enter Board Room' : 'Create Credentials'}
-              </button>
-            </form>
+                <div className="space-y-1.5 text-left">
+                  <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
+                    Security Password
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
+                  />
+                  {authMode === 'login' && (
+                    <div className="text-right mt-2">
+                      <button
+                        type="button"
+                        onClick={() => { setAuthMode('forgot'); setRecoveryEmail(''); setRecoveryStep('email'); setRecoveredProfile(null); }}
+                        className="text-xs text-mint/70 hover:text-mint font-mono"
+                      >
+                        Forgot Password?
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {authMode === 'signup' && (
+                  <div className="space-y-1.5 text-left">
+                    <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
+                      Password Hint (Display on Recovery)
+                    </label>
+                    <input
+                      type="text"
+                      value={passwordHintInput}
+                      onChange={(e) => setPasswordHintInput(e.target.value)}
+                      placeholder="e.g. My puppy name / mom bday"
+                      className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full mt-2 py-3 bg-mint text-pine font-sans uppercase tracking-widest font-black text-xs rounded-xl shadow-md cursor-pointer select-none border-b-2 border-emerald-700 hover:bg-white hover:scale-[1.01] active:scale-[0.99] transition-all"
+                >
+                  {authMode === 'login' ? 'Enter Board Room' : 'Create Credentials'}
+                </button>
+              </form>
+            ) : (
+              <div className="space-y-4">
+                {recoveryStep === 'email' ? (
+                  <form onSubmit={handleForgotPasswordVerify} className="space-y-4">
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
+                        Enter Registered Email for Recovery
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={recoveryEmail}
+                        onChange={(e) => setRecoveryEmail(e.target.value)}
+                        placeholder="name@example.com"
+                        className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="flex-1 py-3 bg-mint text-pine font-sans uppercase tracking-widest font-black text-xs rounded-xl shadow-md border-b-2 border-emerald-700"
+                      >
+                        Verify Email
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAuthMode('login'); setRecoveryEmail(''); }}
+                        className="flex-1 py-3 bg-transparent text-cream/60 border border-pine-light/20 rounded-xl text-xs font-bold"
+                      >
+                        Back
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handlePasswordResetSubmit} className="space-y-4">
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
+                        Password Hint
+                      </label>
+                      <div className="text-xs text-cream/60 px-4 py-2.5 bg-pine border border-pine-light/30 rounded-xl">
+                        {recoveredProfile?.passwordHint ?? 'No password hint available.'}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
+                        Recovery OTP
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={enteredRecoveryOtp}
+                        onChange={(e) => setEnteredRecoveryOtp(e.target.value)}
+                        placeholder="Enter the code from your email"
+                        className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
+                      />
+                      <p className="text-[10px] text-cream/50">A one-time recovery code was sent to your registered email.</p>
+                    </div>
+
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] uppercase font-bold text-mint/80 tracking-wider block font-mono">
+                        New Password
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        value={newPasswordInput}
+                        onChange={(e) => setNewPasswordInput(e.target.value)}
+                        placeholder="Enter new password"
+                        className="w-full bg-pine border border-pine-light/30 text-xs font-semibold text-cream placeholder-mint/30 px-4 py-2.5 rounded-xl outline-none focus:border-mint focus:ring-4 focus:ring-mint/10 transition-all text-center"
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="flex-1 py-3 bg-mint text-pine font-sans uppercase tracking-widest font-black text-xs rounded-xl shadow-md border-b-2 border-emerald-700"
+                      >
+                        Reset Password
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAuthMode('login'); setRecoveryStep('email'); setRecoveredProfile(null); }}
+                        className="flex-1 py-3 bg-transparent text-cream/60 border border-pine-light/20 rounded-xl text-xs font-bold"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
           </div>
 
           <p className="text-[10px] text-mint/30 mt-6 text-center font-mono select-none">
@@ -621,9 +764,7 @@ export default function App() {
                 <span className="text-[9px] uppercase tracking-wider font-black text-mint bg-teal-900/50 border border-teal-500/20 px-2 py-0.5 rounded-full">
                   {profile.tier}
                 </span>
-                <span className="text-[9px] text-cream/50 font-mono">
-                  🪙 {(profile.coins ?? 0).toLocaleString()} coins
-                </span>
+                {/* coins removed from UI */}
                 <span className="text-[9px] text-cream/50 font-mono">
                   ⚡ {profile.streak}d streak
                 </span>

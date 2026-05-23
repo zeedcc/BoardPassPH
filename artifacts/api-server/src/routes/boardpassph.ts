@@ -1,9 +1,133 @@
 import { Router } from "express";
 import { GoogleGenAI, Type } from "@google/genai";
 import crypto from "crypto";
+import webpush from 'web-push';
+import nodemailer from 'nodemailer';
 import { SEED_QUESTIONS } from "../data/seedQuestions.js";
 
 const router = Router();
+
+// --- Web Push support (in-memory subscriptions for demo) ---
+const subscriptionsByEmail = new Map<string, any>();
+
+// Ensure VAPID keys exist
+let VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
+let VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
+if (!VAPID_PUBLIC || !VAPID_PRIVATE) {
+  try {
+    const keys = webpush.generateVAPIDKeys();
+    VAPID_PUBLIC = keys.publicKey;
+    VAPID_PRIVATE = keys.privateKey;
+    console.log('Generated ephemeral VAPID keys. Set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY in production.');
+  } catch (e) {
+    console.warn('Could not generate VAPID keys:', e);
+  }
+}
+webpush.setVapidDetails('mailto:admin@boardpass.ph', VAPID_PUBLIC, VAPID_PRIVATE);
+
+router.get('/push/vapidPublicKey', (_req, res) => {
+  res.json({ publicKey: VAPID_PUBLIC });
+});
+
+router.post('/push/subscribe', async (req, res) => {
+  const { email, subscription } = req.body;
+  if (!email || !subscription) return res.status(400).json({ error: 'Missing email or subscription' });
+  subscriptionsByEmail.set(email.toLowerCase(), subscription);
+  return res.json({ success: true });
+});
+
+router.post('/push/send', async (req, res) => {
+  const { email, title, body, data } = req.body;
+  try {
+    if (email) {
+      const sub = subscriptionsByEmail.get(email.toLowerCase());
+      if (!sub) return res.status(404).json({ error: 'No subscription for email' });
+      await webpush.sendNotification(sub, JSON.stringify({ title, body, data }));
+      return res.json({ sent: true });
+    }
+    // broadcast
+    const promises: Promise<any>[] = [];
+    for (const sub of subscriptionsByEmail.values()) {
+      promises.push(webpush.sendNotification(sub, JSON.stringify({ title, body, data })).catch(e => e));
+    }
+    await Promise.all(promises);
+    return res.json({ sent: true, count: subscriptionsByEmail.size });
+  } catch (err) {
+    console.error('Push send error', err);
+    return res.status(500).json({ error: 'Failed to send push' });
+  }
+});
+
+function createRecoveryTransporter() {
+  if (!process.env.MY_EMAIL || !process.env.MY_PASSWORD) {
+    throw new Error('Missing MY_EMAIL or MY_PASSWORD environment variables for recovery email delivery.');
+  }
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.MY_EMAIL,
+      pass: process.env.MY_PASSWORD,
+    },
+  });
+}
+
+router.post('/send-recovery-email', async (req, res) => {
+  const { recipient_email, otp } = req.body;
+  if (!recipient_email || !otp) {
+    return res.status(400).json({ error: 'recipient_email and otp are required.' });
+  }
+  try {
+    const transporter = createRecoveryTransporter();
+    const mailConfigs = {
+      from: process.env.MY_EMAIL,
+      to: recipient_email,
+      subject: 'BoardPassPH Password Recovery OTP',
+      html: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BoardPassPH Password Recovery</title>
+</head>
+<body style="margin:0;padding:0;background:#071517;font-family:Inter,system-ui,sans-serif;color:#f8fafc;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="min-width:100%;background:#071517;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#0f172a;border-radius:24px;overflow:hidden;box-shadow:0 24px 80px rgba(15,23,42,0.35);">
+          <tr>
+            <td style="padding:32px 32px 16px; background:linear-gradient(135deg,#14b8a6,#06b6d4);">
+              <h1 style="margin:0;font-size:28px;font-weight:800;color:#f8fafc;">BoardPassPH</h1>
+              <p style="margin:8px 0 0;font-size:14px;color:rgba(248,250,252,0.8);">Password recovery request received.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 32px 24px;color:#e2e8f0;">
+              <p style="margin:0 0 16px;font-size:16px;line-height:1.7;">Hi,</p>
+              <p style="margin:0 0 24px;font-size:15px;line-height:1.75;color:#cbd5e1;">Use the one-time code below to reset your BoardPassPH password. The OTP is valid for 5 minutes.</p>
+              <div style="display:inline-block;padding:20px 28px;border-radius:18px;background:#0f172a;border:1px solid rgba(56,189,248,0.15);font-size:28px;font-weight:800;letter-spacing:0.15em;color:#38bdf8;">${otp}</div>
+              <p style="margin:28px 0 0;font-size:14px;color:rgba(248,250,252,0.75);">If you did not request a password reset, you can safely ignore this message.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 32px 32px;background:#020617;color:#94a3b8;font-size:13px;line-height:1.6;">
+              <p style="margin:0;">BoardPassPH · Philippine Board Review</p>
+              <p style="margin:8px 0 0;">Need help? Reply to this email or visit the BoardPassPH app.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
+    };
+
+    await transporter.sendMail(mailConfigs);
+    return res.json({ message: 'Email sent successfully' });
+  } catch (error) {
+    console.error('Recovery email delivery failed', error);
+    return res.status(500).json({ error: 'Could not send recovery email.' });
+  }
+});
 
 let genAIClient: GoogleGenAI | null = null;
 
@@ -188,149 +312,9 @@ router.post("/submit-feedback", (req, res) => {
   });
 });
 
-const COIN_PACKAGES: Record<string, { amount: number; coins: number; label: string }> = {
-  sulit:    { amount: 5000,  coins: 50000,  label: "Sulit Tier — 50,000 Coins" },
-  pro:      { amount: 14900, coins: 160000, label: "Pro Tier — 160,000 Coins" },
-  clinical: { amount: 29900, coins: 350000, label: "Clinical Tier — 350,000 Coins" },
-};
-
-const processedLinks = new Set<string>();
-
-router.post("/paymongo/create-link", async (req, res) => {
-  const { packageId, email } = req.body;
-  if (!packageId || !email) {
-    return res.status(400).json({ error: "Missing packageId or email." });
-  }
-
-  const pkg = COIN_PACKAGES[packageId];
-  if (!pkg) {
-    return res.status(400).json({ error: "Invalid package ID." });
-  }
-
-  const secretKey = process.env.PAYMONGO_SECRET_KEY;
-  if (!secretKey) {
-    return res.status(503).json({ error: "PayMongo is not configured on this server." });
-  }
-
-  try {
-    const encoded = Buffer.from(`${secretKey}:`).toString("base64");
-    const pmRes = await fetch("https://api.paymongo.com/v1/links", {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${encoded}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        data: {
-          attributes: {
-            amount: pkg.amount,
-            description: `BoardPassPH — ${pkg.label}`,
-            remarks: `email:${email}|package:${packageId}`,
-          }
-        }
-      })
-    });
-
-    const data = await pmRes.json() as any;
-    if (!pmRes.ok) {
-      const detail = data.errors?.[0]?.detail || "PayMongo error";
-      return res.status(400).json({ error: detail });
-    }
-
-    return res.json({
-      checkout_url: data.data.attributes.checkout_url,
-      link_id: data.data.id,
-      reference_number: data.data.attributes.reference_number,
-      coins: pkg.coins,
-    });
-  } catch {
-    return res.status(500).json({ error: "Failed to create payment link." });
-  }
-});
-
-router.post("/paymongo/verify", async (req, res) => {
-  const { link_id, email } = req.body;
-  if (!link_id || !email) {
-    return res.status(400).json({ error: "Missing link_id or email." });
-  }
-
-  if (processedLinks.has(link_id)) {
-    return res.status(409).json({ error: "This payment link has already been credited." });
-  }
-
-  const secretKey = process.env.PAYMONGO_SECRET_KEY;
-  if (!secretKey) {
-    return res.status(503).json({ error: "PayMongo is not configured on this server." });
-  }
-
-  try {
-    const encoded = Buffer.from(`${secretKey}:`).toString("base64");
-    const pmRes = await fetch(`https://api.paymongo.com/v1/links/${link_id}`, {
-      headers: { Authorization: `Basic ${encoded}` }
-    });
-
-    const data = await pmRes.json() as any;
-    if (!pmRes.ok) {
-      return res.status(400).json({ error: "Payment link not found." });
-    }
-
-    const attrs = data.data?.attributes;
-    if (!attrs) {
-      return res.status(400).json({ error: "Invalid payment link data." });
-    }
-
-    if (attrs.status !== "paid") {
-      return res.json({ paid: false, status: attrs.status });
-    }
-
-    const remarks: string = attrs.remarks || "";
-    const packageMatch = remarks.match(/package:([^|]+)/);
-    const packageId = packageMatch?.[1];
-    const pkg = COIN_PACKAGES[packageId || ""];
-
-    if (!pkg) {
-      return res.status(400).json({ error: "Cannot determine coin amount from payment." });
-    }
-
-    processedLinks.add(link_id);
-    return res.json({ paid: true, coins: pkg.coins, package: packageId });
-  } catch {
-    return res.status(500).json({ error: "Failed to verify payment." });
-  }
-});
-
-router.post("/paymongo/webhook", async (req, res) => {
-  const signature = req.headers["paymongo-signature"] as string | undefined;
-  const webhookSecret = process.env.PAYMONGO_WEBHOOK_SECRET;
-
-  let rawBody: string;
-  try {
-    rawBody = JSON.stringify(req.body);
-  } catch {
-    return res.status(400).json({ error: "Invalid body" });
-  }
-
-  if (webhookSecret && signature) {
-    const parts = signature.split(",");
-    const timestamp = parts[0]?.replace("t=", "");
-    const testSig = parts.find(p => p.startsWith("te="))?.replace("te=", "");
-    const liveSig = parts.find(p => p.startsWith("li="))?.replace("li=", "");
-    const toHash = `${timestamp}.${rawBody}`;
-    const hmac = crypto.createHmac("sha256", webhookSecret).update(toHash).digest("hex");
-    if (hmac !== testSig && hmac !== liveSig) {
-      return res.status(400).json({ error: "Invalid webhook signature." });
-    }
-  }
-
-  const event = req.body as any;
-  if (event?.data?.attributes?.type === "link.payment.paid") {
-    const linkId: string = event.data?.attributes?.data?.id || "";
-    if (linkId && !processedLinks.has(linkId)) {
-      processedLinks.add(linkId);
-    }
-  }
-
-  return res.json({ received: true });
+// PayMongo integration removed. Any requests to /paymongo/* will return 410 Gone.
+router.all('/paymongo/*', (req, res) => {
+  return res.status(410).json({ error: 'PayMongo integration has been removed from this server.' });
 });
 
 export default router;

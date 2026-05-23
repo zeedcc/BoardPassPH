@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Camera, Edit3, Save, X, User, School, Lock, Eye, EyeOff, Star, Flame, Target, Coins } from 'lucide-react';
+import { Camera, Edit3, Save, X, User, School, Lock, Eye, EyeOff, Star, Flame, Target } from 'lucide-react';
 import { UserProfile } from '../types';
 
 interface ProfilePanelProps {
@@ -36,7 +36,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, setProfile 
 
   const level = getLevelFromXp(profile.totalXp);
   const accuracy = getAccuracy(profile);
-  const coins = profile.coins ?? 0;
+  const coins = 0;
   const displayName = profile.username || profile.email.split('@')[0];
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -94,6 +94,33 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, setProfile 
     setConfirmPassword('');
     setIsEditing(false);
   };
+
+  async function registerAndSubscribeForPush(email: string) {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      // fetch vapid key
+      const r = await fetch('/api/push/vapidPublicKey');
+      const data = await r.json();
+      const publicKey = data.publicKey;
+      function urlBase64ToUint8Array(base64String: string) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+          outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+      }
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+      await fetch('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, subscription: sub }) });
+      return true;
+    } catch (e) {
+      console.warn('Push subscription failed', e);
+      return false;
+    }
+  }
 
   const handleCancel = () => {
     setDraftUsername(profile.username || '');
@@ -170,10 +197,9 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, setProfile 
           {/* Stats row */}
           <div className="grid grid-cols-4 gap-3 mt-6 pt-5 border-t border-pine-light/20">
             {[
-              { icon: Star, label: 'XP', value: profile.totalXp.toLocaleString(), color: 'text-amber-300' },
-              { icon: Flame, label: 'Streak', value: `${profile.streak}d`, color: 'text-orange-400' },
-              { icon: Target, label: 'Accuracy', value: `${accuracy}%`, color: 'text-emerald-400' },
-              { icon: Coins, label: 'Coins', value: coins >= 1000 ? `${(coins / 1000).toFixed(1)}k` : coins.toLocaleString(), color: 'text-yellow-300' },
+                { icon: Star, label: 'XP', value: profile.totalXp.toLocaleString(), color: 'text-amber-300' },
+                { icon: Flame, label: 'Streak', value: `${profile.streak}d`, color: 'text-orange-400' },
+                { icon: Target, label: 'Accuracy', value: `${accuracy}%`, color: 'text-emerald-400' },
             ].map(stat => (
               <div key={stat.label} className="text-center space-y-1">
                 <stat.icon className={`w-4 h-4 mx-auto ${stat.color}`} />
@@ -217,6 +243,48 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, setProfile 
                 placeholder="e.g. University of Santo Tomas"
                 className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:border-sage outline-none transition"
               />
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4 space-y-3">
+            <h4 className="text-[10px] uppercase font-bold text-gray-400 tracking-wider flex items-center gap-1.5">
+              Settings
+            </h4>
+            <div className="grid grid-cols-1 gap-3">
+              <label className="flex items-center gap-3">
+                <input type="checkbox" checked={!!profile.rememberQuestionHistory} onChange={e => setProfile(p => p ? { ...p, rememberQuestionHistory: e.target.checked } : null)} />
+                <span className="text-sm">Remember seen questions (avoid repeats)</span>
+              </label>
+              <label className="flex items-center gap-3">
+                <input type="checkbox" checked={!!profile.allowPushNotifications} onChange={async e => {
+                  const want = e.target.checked;
+                  if (want && 'Notification' in window) {
+                    try {
+                      const perm = await Notification.requestPermission();
+                      if (perm !== 'granted') {
+                        alert('Notifications permission denied or dismissed. You can enable it in browser settings.');
+                      } else {
+                        // register service worker and subscribe
+                        const ok = await registerAndSubscribeForPush(profile.email);
+                        if (!ok) alert('Push subscription failed. Notifications may not work.');
+                      }
+                    } catch (err) { console.warn(err); }
+                  }
+                  setProfile(p => p ? { ...p, allowPushNotifications: want } : null);
+                }} />
+                <span className="text-sm">Enable calendar / PWA notifications</span>
+              </label>
+              <label className="flex items-center gap-3">
+                <input type="checkbox" checked={!!profile.autoSubjectAccuracy} onChange={e => setProfile(p => p ? { ...p, autoSubjectAccuracy: e.target.checked } : null)} />
+                <span className="text-sm">Auto subject accuracy (prioritize weak subjects)</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4 space-y-3">
+            <h4 className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Habits</h4>
+            <div className="space-y-2">
+              <HabitsEditor profile={profile} setProfile={setProfile} />
             </div>
           </div>
 
@@ -290,7 +358,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, setProfile 
             { label: 'Missed (In Deck)', value: profile.deck.length },
             { label: 'Total XP Earned', value: profile.totalXp.toLocaleString() },
             { label: 'Streak Shields', value: profile.streakShields },
-            { label: 'Coins Balance', value: (profile.coins ?? 0).toLocaleString() },
+            // coins removed
           ].map(stat => (
             <div key={stat.label} className="bg-foam/40 border border-sage/10 rounded-xl p-3 space-y-0.5">
               <div className="font-display text-xl text-pine">{stat.value}</div>
@@ -303,6 +371,56 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, setProfile 
         </p>
       </div>
 
+      <div className="mt-4 text-center">
+        <button
+          onClick={() => {
+            if (!confirm('Permanently delete your account and all local data? THIS CANNOT BE UNDONE.')) return;
+            try { localStorage.removeItem(`bp_profile_${profile.email}`); } catch {};
+            setProfile({} as UserProfile);
+            window.location.reload();
+          }}
+          className="px-4 py-2 bg-rose-600 text-white rounded-xl font-bold"
+        >
+          Permanently Delete Account
+        </button>
+      </div>
+
+    </div>
+  );
+};
+
+const HabitsEditor: React.FC<{ profile: UserProfile; setProfile: React.Dispatch<React.SetStateAction<UserProfile>> }> = ({ profile, setProfile }) => {
+  const [newHabit, setNewHabit] = useState('');
+  const habits = profile.habits || [];
+
+  const addHabit = () => {
+    const v = newHabit.trim();
+    if (!v) return;
+    const updated = [...habits, v];
+    setProfile(p => ({ ...p, habits: updated } as UserProfile));
+    setNewHabit('');
+  };
+
+  const removeHabit = (idx: number) => {
+    const updated = habits.filter((_, i) => i !== idx);
+    setProfile(p => ({ ...p, habits: updated } as UserProfile));
+  };
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <input value={newHabit} onChange={e => setNewHabit(e.target.value)} placeholder="New habit (e.g. 30m review)" className="flex-1 border rounded-xl px-3 py-2" />
+        <button onClick={addHabit} className="px-3 py-2 bg-mint text-pine rounded-xl">Add</button>
+      </div>
+      <div className="mt-2 space-y-2">
+        {habits.length === 0 && <div className="text-sm text-gray-400">No habits yet.</div>}
+        {habits.map((h, i) => (
+          <div key={i} className="flex items-center justify-between bg-foam/40 border border-sage/10 rounded-xl px-3 py-2">
+            <div className="text-sm">{h}</div>
+            <button onClick={() => removeHabit(i)} className="text-xs text-rose-600">Delete</button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

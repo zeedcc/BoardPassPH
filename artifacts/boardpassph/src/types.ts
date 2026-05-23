@@ -43,7 +43,7 @@ export interface UserProfile {
   email: string;
   tier: 'Free' | 'Pro' | 'Clinical' | 'Clinical Trial';
   adaptive: boolean;
-  coins?: number;
+  // coins system removed; legacy data may exist but UI no longer uses it
   username?: string;
   school?: string;
   photo?: string;
@@ -66,6 +66,13 @@ export interface UserProfile {
   habitsChecked?: Record<string, Record<string, boolean>>;
   calendarEvents?: Record<string, { id: string; title: string; note?: string; color: string }[]>;
   dailyChallenges?: Record<string, 'correct' | 'incorrect'>;
+  // New settings
+  allowPushNotifications?: boolean;
+  rememberQuestionHistory?: boolean;
+  autoSubjectAccuracy?: boolean;
+  habits?: string[];
+  questionHistory?: string[]; // store question vignette hashes or ids to avoid repeats
+  subjectAccuracy?: Record<string, number>;
 }
 
 export interface ExamQuestionState {

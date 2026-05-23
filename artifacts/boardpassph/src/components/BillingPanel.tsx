@@ -65,12 +65,6 @@ const PLANS = [
 
 export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile }) => {
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
-  const [pendingLink, setPendingLink] = useState<{ link_id: string; plan: string; planName: string } | null>(() => {
-    try {
-      const s = localStorage.getItem('bp_pending_sub');
-      return s ? JSON.parse(s) : null;
-    } catch { return null; }
-  });
   const [verifying, setVerifying] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState('');
   const [error, setError] = useState('');
@@ -88,23 +82,17 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
     setLoadingPlan(planId);
     setError('');
     try {
-      const res = await fetch('pk_live_bRDZmWv5e9LVUPgCfz39f5cy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId: planId, email: profile.email }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Could not create payment link.');
-        return;
-      }
+      // PayMongo removed — activate plan locally for now
       const planName = PLANS.find(p => p.id === planId)?.name ?? planId;
-      const pending = { link_id: data.link_id, plan: planId, planName };
-      setPendingLink(pending);
-      localStorage.setItem('bp_pending_sub', JSON.stringify(pending));
-      window.open(data.checkout_url, '_blank');
+      const newTier = planId === 'pro' ? 'Pro' : 'Clinical';
+      setProfile(prev => {
+        const updated = { ...prev, tier: newTier as UserProfile['tier'] };
+        localStorage.setItem(`bp_profile_${prev.email}`, JSON.stringify(updated));
+        return updated;
+      });
+      setVerifyMsg(`✅ Subscribed locally to ${planName}. (Payments removed)`);
     } catch {
-      setError('Network error — please try again.');
+      setError('Failed to activate plan locally.');
     } finally {
       setLoadingPlan(null);
     }
@@ -143,10 +131,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
     }
   };
 
-  const dismissPending = () => {
-    setPendingLink(null);
-    localStorage.removeItem('bp_pending_sub');
-  };
+  const dismissPending = () => {};
 
   return (
     <div className="space-y-8">
@@ -211,10 +196,10 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
 
       {/* Plan cards */}
       <div>
-        <div className="text-center space-y-1 mb-6">
-          <h2 className="font-display text-2xl text-pine">Choose Your Plan</h2>
-          <p className="text-xs text-gray-500 font-medium">Monthly subscription · Cancel anytime · Secure via PayMongo</p>
-        </div>
+          <div className="text-center space-y-1 mb-6">
+            <h2 className="font-display text-2xl text-pine">Choose Your Plan</h2>
+            <p className="text-xs text-gray-500 font-medium">Monthly subscription · Cancel anytime</p>
+          </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {PLANS.map(plan => {
@@ -318,15 +303,9 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ profile, setProfile 
         </div>
       </div>
 
-      {/* PayMongo note */}
-      <div className="bg-[#eaf3ff] border border-blue-200 rounded-2xl p-4 text-center space-y-1">
-        <span className="text-[26px] font-black text-[#005CE6] font-display block leading-none">PayMongo</span>
-        <p className="text-[10px] text-blue-700 font-medium">
-          Secure Philippine payments via GCash, Maya, credit/debit cards &amp; more.
-        </p>
-        <p className="text-[9px] text-blue-500 font-mono">
-          After checkout, click "Verify Payment" above to instantly activate your subscription.
-        </p>
+      {/* Payments removed: subscriptions activate locally for testing */}
+      <div className="bg-foam/40 border border-sage/10 rounded-2xl p-4 text-center text-sm text-gray-600">
+        Payments integration removed for this build. Subscriptions activate locally for testing purposes.
       </div>
 
       {/* Plan comparison infographic */}

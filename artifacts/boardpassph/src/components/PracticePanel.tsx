@@ -234,6 +234,16 @@ export const PracticePanel: React.FC<PracticePanelProps> = ({
         heat: { ...prev.heat, [todayString]: todayHeat }
       };
 
+      // record question vignette fingerprint to history to avoid repeats
+      try {
+        if (prev.rememberQuestionHistory && currentQuestion) {
+          const key = btoa(currentQuestion.vignette.substring(0, 32));
+          const existing = prev.questionHistory || [];
+          const nextHistory = [...existing, key].slice(-500); // keep last 500
+          (profilePayload as any).questionHistory = nextHistory;
+        }
+      } catch (e) { /* ignore */ }
+
       // Backup local storage too
       localStorage.setItem(`bp_profile_${prev.email}`, JSON.stringify(profilePayload));
       return profilePayload;

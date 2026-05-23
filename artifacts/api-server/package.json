@@ -7,6 +7,7 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
+    "migrate:remove-coins": "node ./scripts/remove_coins.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -14,7 +15,11 @@
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "cookie-parser": "^1.4.7",
+    "web-push": "^3.5.0",
+    "nodemailer": "^6.9.4",
+    "dotenv": "^16.3.1",
     "cors": "^2.8.6",
+    "firebase-admin": "^11.11.0",
     "drizzle-orm": "catalog:",
     "express": "^5.2.1",
     "pino": "^9.14.0",

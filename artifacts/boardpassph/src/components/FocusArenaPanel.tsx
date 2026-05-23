@@ -770,58 +770,7 @@ export const FocusArenaPanel: React.FC<FocusArenaPanelProps> = ({ profile, setPr
   const [groupRoomName, setGroupRoomName] = useState('');
   const [groupRoomId, setGroupRoomId] = useState<string | null>(null);
   const [groupRoomLink, setGroupRoomLink] = useState<string | null>(null);
-  const [groupParticipants, setGroupParticipants] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('bp_group_participants');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
-    }
-  });
-
-  const LOCAL_GROUP_ROOMS_KEY = 'bp_group_rooms';
-  const getLocalGroupRooms = () => {
-    try {
-      return JSON.parse(localStorage.getItem(LOCAL_GROUP_ROOMS_KEY) || '{}');
-    } catch {
-      return {};
-    }
-  };
-  const saveLocalGroupRooms = (rooms: Record<string, any>) => {
-    localStorage.setItem(LOCAL_GROUP_ROOMS_KEY, JSON.stringify(rooms));
-  };
-  const getLocalGroupRoom = (id: string) => {
-    const rooms = getLocalGroupRooms();
-    return rooms[id] ?? null;
-  };
-  const createLocalGroupRoom = (room: any) => {
-    const rooms = getLocalGroupRooms();
-    rooms[room.id] = room;
-    saveLocalGroupRooms(rooms);
-  };
-  const joinLocalGroupRoom = (id: string, email: string) => {
-    const rooms = getLocalGroupRooms();
-    const room = rooms[id];
-    if (!room) return null;
-    room.participants = Array.from(new Set([...(room.participants || []), email]));
-    rooms[id] = room;
-    saveLocalGroupRooms(rooms);
-    return room;
-  };
-
-  useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (!event.key || event.key !== LOCAL_GROUP_ROOMS_KEY) return;
-      if (!groupRoomId) return;
-      const room = getLocalGroupRoom(groupRoomId);
-      if (room?.participants) {
-        setGroupParticipants(room.participants);
-      }
-    };
-
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, [groupRoomId]);
+  const [groupParticipants, setGroupParticipants] = useState<string[]>([]);
 
   const DUEL_QUESTIONS = [
     {
@@ -899,19 +848,31 @@ export const FocusArenaPanel: React.FC<FocusArenaPanelProps> = ({ profile, setPr
       showToast(`Study space "${groupRoomName}" created — share the link with classmates.`);
     } catch (err) {
       console.error('Failed to create room', err);
-      const localRoom = {
-        id,
-        name: groupRoomName,
-        host: profile.email,
-        participants: [profile.email],
-        createdAt: new Date().toISOString()
-      };
-      createLocalGroupRoom(localRoom);
-      const link = `${window.location.origin}${window.location.pathname}#group-study=${id}`;
-      setGroupRoomId(id);
-      setGroupRoomLink(link);
-      setGroupParticipants(localRoom.participants);
-      showToast(`Study space "${groupRoomName}" created locally. Share the link with classmates.`);
+      // Fallback: create a localStorage-backed room for same-device or same-browser sharing
+      try {
+        const localRoomsStr = localStorage.getItem('bp_local_studyRooms') || '{}';
+        const localRooms = JSON.parse(localRoomsStr);
+        const localData = { id, name: groupRoomName, host: profile.email, participants: [profile.email], createdAt: Date.now() };
+        localRooms[id] = localData;
+        localStorage.setItem('bp_local_studyRooms', JSON.stringify(localRooms));
+        const link = `${window.location.origin}${window.location.pathname}#group-study=${id}`;
+        setGroupRoomId(id);
+        setGroupRoomLink(link);
+        setGroupParticipants([profile.email]);
+        // Listen for storage changes in other tabs
+        const onStorage = (ev: StorageEvent) => {
+          if (ev.key === 'bp_local_studyRooms') {
+            const updated = JSON.parse(localStorage.getItem('bp_local_studyRooms') || '{}');
+            const room = updated[id];
+            if (room) setGroupParticipants(room.participants || []);
+          }
+        };
+        window.addEventListener('storage', onStorage);
+        playBeepTone(700, 0.18, 'sine');
+        showToast(`Study space "${groupRoomName}" created locally — share the link with classmates.`);
+      } catch (e) {
+        showToast('Unable to create study room in cloud sync. Please check your connection and try again.');
+      }
     }
   };
 
@@ -942,6 +903,15 @@ export const FocusArenaPanel: React.FC<FocusArenaPanelProps> = ({ profile, setPr
       try {
         const snap = await firestoreWithTimeout(getDoc(roomRef));
         if (!snap.exists()) {
+          // try local fallback
+          const localRooms = JSON.parse(localStorage.getItem('bp_local_studyRooms') || '{}');
+          if (localRooms[id]) {
+            setGroupRoomId(id);
+            setGroupRoomLink(`${window.location.origin}${window.location.pathname}#group-study=${id}`);
+            setGroupParticipants(localRooms[id].participants || []);
+            showToast(`Joined local study space: ${localRooms[id].name}`);
+            return;
+          }
           showToast('Study room not found.');
           return;
         }
@@ -960,20 +930,23 @@ export const FocusArenaPanel: React.FC<FocusArenaPanelProps> = ({ profile, setPr
         showToast(`Joined study space: ${snap.data()?.name || id}`);
       } catch (err) {
         console.error('Failed to join room', err);
-        const localRoom = getLocalGroupRoom(id);
-        if (!localRoom) {
-          showToast('Study room not found.');
-          return;
-        }
-
-        const updatedRoom = joinLocalGroupRoom(id, profile.email);
-        if (updatedRoom) {
-          setGroupRoomId(id);
-          setGroupRoomLink(`${window.location.origin}${window.location.pathname}#group-study=${id}`);
-          setGroupParticipants(updatedRoom.participants || []);
-          playBeepTone(520, 0.12, 'sine');
-          showToast(`Joined study space: ${updatedRoom.name || id}`);
-        }
+        // fallback: check localStorage rooms
+        try {
+          const localRooms = JSON.parse(localStorage.getItem('bp_local_studyRooms') || '{}');
+          if (localRooms[id]) {
+            // add self
+            const room = localRooms[id];
+            if (!room.participants.includes(profile.email)) room.participants.push(profile.email);
+            localRooms[id] = room;
+            localStorage.setItem('bp_local_studyRooms', JSON.stringify(localRooms));
+            setGroupRoomId(id);
+            setGroupRoomLink(`${window.location.origin}${window.location.pathname}#group-study=${id}`);
+            setGroupParticipants(room.participants || []);
+            showToast(`Joined local study space: ${room.name}`);
+            return;
+          }
+        } catch {}
+        showToast('Unable to join study room. Please verify the room link and try again.');
       }
     })();
 
