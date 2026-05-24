@@ -7,8 +7,9 @@ import {
   sendPasswordResetEmail,
   onAuthStateChanged,
   updatePassword,
+  signInAnonymously,
 } from 'firebase/auth';
-import { getFirestore, doc } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfigRaw from '../firebase-applet-config.json';
 
 type FirebaseConfig = {
@@ -37,6 +38,44 @@ export {
   sendPasswordResetEmail,
   onAuthStateChanged,
 };
+
+export const firebaseStatus = {
+  authAnonymousDisabled: false,
+  authOperationNotAllowed: false,
+  firestoreDatabaseMissing: false,
+  errorMessage: ''
+};
+
+signInAnonymously(auth).catch((err) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  firebaseStatus.authAnonymousDisabled = msg.includes('auth/admin-restricted-operation') || msg.includes('admin-restricted-operation');
+  // Detect when the auth provider (anonymous) is not enabled in Firebase console
+  firebaseStatus.authOperationNotAllowed = msg.includes('auth/operation-not-allowed') || msg.includes('operation-not-allowed');
+  firebaseStatus.errorMessage = msg;
+  if (firebaseStatus.authOperationNotAllowed) {
+    console.error('Firebase Auth anonymous login failed: operation-not-allowed. Enable Anonymous sign-in in the Firebase Console (Authentication → Sign-in method).', err);
+  } else {
+    console.warn('Firebase Auth anonymous login failed:', err);
+  }
+});
+
+async function testConnection() {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error) {
+      const msg = error.message;
+      firebaseStatus.errorMessage = msg;
+      if (msg.includes("Database '(default)' not found")) {
+        firebaseStatus.firestoreDatabaseMissing = true;
+        console.error('Firestore default database not found. Please create a Firestore database in your Firebase project.');
+      } else if (msg.includes('the client is offline')) {
+        console.error('Please check your Firebase configuration or network status.');
+      }
+    }
+  }
+}
+testConnection();
 
 export async function firestoreWithTimeout<T>(operation: Promise<T>, timeoutMs = 4000): Promise<T> {
   return Promise.race([
